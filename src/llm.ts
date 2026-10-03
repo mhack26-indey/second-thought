@@ -314,6 +314,9 @@ const TYPE_SYNONYMS: Record<string, ItemType> = {
   chinos: "pants",
   trousers: "pants",
   joggers: "sweatpants",
+  sweats: "sweatpants",
+  trackies: "sweatpants",
+  kicks: "sneakers",
   cargo: "pants",
   parka: "coat",
   "button down": "button-up shirt",
@@ -348,6 +351,11 @@ const KNOWN_WORDS: [string, ItemType][] = [
 /** The item type named in a phrase ("my gray sweater" -> sweater), if any. */
 export function typeIn(text: string): ItemType | undefined {
   return resolveType(undefined, text);
+}
+
+/** The first pattern word in a phrase ("navy striped polo" -> striped), if any. */
+export function patternIn(text: string): string | undefined {
+  return text.toLowerCase().split(/[^a-z-]+/).find((w) => PATTERNS.has(w));
 }
 
 /** The first color word in a phrase ("the dark blue jeans" -> blue), if any. */

@@ -3,8 +3,9 @@ import { CATEGORIES, type Category } from "./closet/categories.ts";
 import { cityFrom, findCities } from "./cities.ts";
 import { PORT, PUBLIC_URL } from "./config.ts";
 import { addItemToOutfit, linkItem, mergeItems, unlinkItem } from "./fit-edits.ts";
-import { itemFromName } from "./llm.ts";
-import { exactGroups, llmGroups, mostAlike } from "./match.ts";
+import type { ExtractedItem } from "./closet/extract.ts";
+import { colorIn, itemFromName } from "./llm.ts";
+import { exactGroups, llmGroups, mostAlike, searchItems } from "./match.ts";
 import { type Impact, impactSummary } from "./impact.ts";
 import {
   type Item,
@@ -103,6 +104,16 @@ const STYLE = `  :root { color-scheme: light dark; --muted: #888; --line: #8883;
   .fit button.quiet { background: transparent; color: inherit; border: 1px solid var(--line); font-weight: normal; padding: 6px 10px; font-size: 14px; }
   .fit .add { display: grid; gap: 8px; }
   .fit .add div { display: flex; gap: 6px; flex-wrap: wrap; }
+  .fit .add > input { width: 100%; box-sizing: border-box; }
+  .suggest { margin: 0; }
+  .suggest li { padding: 0; border: 0; }
+  .suggest button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; background: transparent; color: inherit; border: 0; border-radius: 8px; font-weight: normal; text-align: left; }
+  .suggest button:hover, .suggest button[aria-selected="true"] { background: var(--line); }
+  .suggest img { width: 36px; height: 48px; aspect-ratio: auto; object-fit: cover; border-radius: 4px; flex: none; }
+  .suggest span { flex: 1; }
+  .suggest small { color: var(--muted); }
+  .fit details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+  .fit details div { display: flex; gap: 6px; margin-top: 8px; }
   .notice { padding: 10px 12px; border-radius: 8px; background: #2a9d5c22; margin: 0 0 16px; }
   .back { color: inherit; display: inline-block; margin-bottom: 12px; }
 `;
@@ -328,12 +339,69 @@ ${outfit.photoUrl ? `<img class="photo" src="${esc(outfit.photoUrl)}" alt="Fit c
 <h2>In this photo <span>${linked.length}</span></h2>
 ${rows ? `<ul>${rows}</ul>` : `<p class="empty">No items linked to this photo.</p>`}
 <h2>Add something that's missing</h2>
-<form class="add" method="post" action="${action}">
+<form class="add" method="post" action="${action}" id="add">
   <input type="hidden" name="op" value="add">
-  <label>Something you already own${owned ? `<select name="existing"><option value="">Pick an item…</option>${owned}</select>` : ` <small>(nothing else in your closet)</small>`}</label>
-  <label>Or a new item<input name="name" maxlength="${MAX_FIELD}" placeholder="e.g. grey puma sweatpants"></label>
-  <div><button>Add to this photo</button></div>
+  <label for="q">Describe it, and pick from your closet as you type</label>
+  <input id="q" name="name" maxlength="${MAX_FIELD}" autocomplete="off" placeholder="e.g. grey sweats, the puma ones"
+    role="combobox" aria-expanded="false" aria-controls="suggest" aria-autocomplete="list">
+  <ul class="suggest" id="suggest" role="listbox"></ul>
+  <div><button id="as-new" disabled>Add as a new item</button></div>
+  ${owned ? `<details><summary>Or browse your closet</summary><div><select name="existing"><option value="">Pick an item…</option>${owned}</select><button class="quiet">Link</button></div></details>` : ""}
 </form>
+<script>
+(() => {
+  const input = document.getElementById("q");
+  const list = document.getElementById("suggest");
+  const asNew = document.getElementById("as-new");
+  let timer, pending, active = -1;
+  const buttons = () => [...list.querySelectorAll("button")];
+  function highlight(i) {
+    const all = buttons();
+    active = all.length ? Math.max(-1, Math.min(i, all.length - 1)) : -1;
+    all.forEach((b, j) => b.setAttribute("aria-selected", String(j === active)));
+    if (active >= 0) input.setAttribute("aria-activedescendant", all[active].id);
+    else input.removeAttribute("aria-activedescendant");
+  }
+  function render(items) {
+    list.replaceChildren(...items.map((it) => {
+      const li = document.createElement("li");
+      const b = document.createElement("button");
+      b.name = "link"; b.value = it.id; b.id = "opt-" + it.id; b.setAttribute("role", "option");
+      if (it.photo) { const img = document.createElement("img"); img.src = it.photo; img.alt = ""; b.append(img); }
+      const label = document.createElement("span"); label.textContent = it.description;
+      const cat = document.createElement("small"); cat.textContent = it.category;
+      b.append(label, cat);
+      li.append(b);
+      return li;
+    }));
+    input.setAttribute("aria-expanded", String(items.length > 0));
+    highlight(-1);
+  }
+  async function search() {
+    const q = input.value.trim();
+    asNew.disabled = !q;
+    asNew.textContent = q ? 'Add "' + q + '" as a new item' : "Add as a new item";
+    pending?.abort();
+    if (!q) return render([]);
+    pending = new AbortController();
+    try {
+      const res = await fetch(location.pathname + "/search?q=" + encodeURIComponent(q), { signal: pending.signal });
+      render(await res.json());
+    } catch (e) { if (e.name !== "AbortError") render([]); }
+  }
+  input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(search, 150); });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); highlight(active + 1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); highlight(active - 1); }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      const pick = buttons()[active];
+      if (pick) input.form.requestSubmit(pick);
+      else if (input.value.trim()) input.form.requestSubmit(asNew);
+    } else if (e.key === "Escape") render([]);
+  });
+})();
+</script>
 </body></html>`;
 }
 
@@ -457,6 +525,21 @@ export function startWebServer() {
           return new Response(null, { status: 303, headers: { Location: redirect } });
         },
       },
+      "/w/:token/fit/:id/search": async (req) => {
+        const user = await getUserByToken(req.params.token);
+        const outfit = user && (await getOutfit(user.id, Number(req.params.id)));
+        if (!user || !outfit) return new Response("Not found", { status: 404 });
+        const q = (new URL(req.url).searchParams.get("q") ?? "").slice(0, MAX_FIELD);
+        const [items, wears] = await Promise.all([listItems(user.id), listWears(user.id)]);
+        const linked = new Set(wears.filter((w) => w.outfitId === outfit.id).map((w) => w.itemId));
+        const pool = items.filter((i) => !linked.has(i.id));
+        // The typed color joins the groups cache (one model call per new color word).
+        const asked = { color_primary: colorIn(q) ?? "unknown", color_secondary: null, pattern: "unknown" } as ExtractedItem;
+        const groups = await llmGroups([...pool, asked]).catch(() => exactGroups);
+        return Response.json(
+          searchItems(q, pool, groups).map((i) => ({ id: i.id, description: i.description, category: i.category, photo: i.photo_url })),
+        );
+      },
       "/w/:token/fit/:id": {
         GET: async (req) => {
           const user = await getUserByToken(req.params.token);
@@ -498,7 +581,7 @@ export function startWebServer() {
               break;
             }
             case "add": {
-              const existing = Number(field("existing"));
+              const existing = Number(field("link") || field("existing"));
               const name = field("name");
               if (existing) {
                 msg = (await linkItem(db, user.id, outfit.id, existing)) ? `Linked ${nameOf(existing)}.` : "Couldn't link that item.";
