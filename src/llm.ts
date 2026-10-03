@@ -1,4 +1,4 @@
-import { CATEGORIES, type Category } from "./store.ts";
+import { CATEGORIES, type Category } from "./categories.ts";
 
 // A small model turns free-form texts into one structured action. Any
 // OpenAI-compatible endpoint works; the default is a local Ollama server.

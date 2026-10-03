@@ -1,9 +1,17 @@
 import { Spectrum } from "spectrum-ts";
 import { imessage } from "@spectrum-ts/imessage";
-import { mkdir } from "node:fs/promises";
-import { extname } from "node:path";
 import { fitCheckPrompt, handlePhoto, handleText, startOnboarding } from "./flows.ts";
-import { DEFAULT_FIT_CHECK_HOUR, PHOTO_DIR, allUsers, createUser, getUser, localDate, save } from "./store.ts";
+import {
+  claimDueReminders,
+  claimFitPing,
+  createUser,
+  fitCheckUsers,
+  getUser,
+  localDate,
+  releaseFitPing,
+  releaseReminder,
+  sql,
+} from "./store.ts";
 import { startWebServer } from "./web.ts";
 
 // Spectrum bridges a single agent loop to many messaging interfaces.
@@ -28,42 +36,55 @@ async function sendTo(userId: string, text: string) {
 // hours of it, so a late restart doesn't send a morning nudge at night.
 const FIT_CHECK_WINDOW_HOURS = 3;
 
+// Claims happen in the database before sending, so a slow send or a second
+// worker can't double-fire. A failed send releases the claim to retry.
 async function sendDueReminders() {
+  for (const reminder of await claimDueReminders()) {
+    try {
+      await sendTo(reminder.userId, `Reminder: ${reminder.text}`);
+    } catch (err) {
+      await releaseReminder(reminder.id);
+      console.error(`reminder ${reminder.id} for ${reminder.userId} failed`, err);
+    }
+  }
+
   const now = new Date();
   const today = localDate(now);
-  for (const user of allUsers()) {
-    for (const reminder of user.reminders) {
-      if (reminder.sent || reminder.at > now.getTime()) continue;
-      reminder.sent = true; // mark first so a slow send can't double-fire
-      try {
-        await sendTo(user.id, `Reminder: ${reminder.text}`);
-      } catch (err) {
-        reminder.sent = false; // retry on the next tick
-        console.error(`reminder ${reminder.id} for ${user.id} failed`, err);
-      }
-    }
-
-    const hour = user.fitCheckHour === undefined ? DEFAULT_FIT_CHECK_HOUR : user.fitCheckHour;
-    if (user.step !== "done" || hour === null) continue;
-    const hoursPast = now.getHours() - hour;
+  for (const user of await fitCheckUsers()) {
+    const hoursPast = now.getHours() - user.fitCheckHour!;
     if (hoursPast < 0 || hoursPast >= FIT_CHECK_WINDOW_HOURS) continue;
-    if (user.lastFitPing === today || user.lastFitPhoto === today) continue;
-    user.lastFitPing = today; // mark first so a slow send can't double-fire
+    if (!(await claimFitPing(user.id, today))) continue; // already pinged, or they sent a photo
     try {
       await sendTo(user.id, fitCheckPrompt());
     } catch (err) {
-      user.lastFitPing = undefined; // retry on the next tick
+      await releaseFitPing(user.id);
       console.error(`fit check ping for ${user.id} failed`, err);
     }
   }
-  await save();
+}
+
+// One tick at a time: a slow database or send shouldn't stack up overlapping runs.
+let ticking = false;
+async function tick() {
+  if (ticking) return;
+  ticking = true;
+  try {
+    await sendDueReminders();
+  } catch (err) {
+    console.error("scheduler tick failed", err);
+  } finally {
+    ticking = false;
+  }
 }
 
 startWebServer();
-const timer = setInterval(sendDueReminders, 15_000);
+const timer = setInterval(tick, 15_000);
 process.on("SIGINT", () => {
   clearInterval(timer);
-  void app.stop().finally(() => process.exit(0));
+  void app
+    .stop()
+    .then(() => sql.close())
+    .finally(() => process.exit(0));
 });
 
 // `app.messages` is an async iterable. Each tick yields a `space` (the
@@ -72,21 +93,16 @@ for await (const [space, message] of app.messages) {
   if (message.direction === "outbound" || !message.sender) continue;
 
   try {
-    let user = getUser(message.sender.id);
+    const user = await getUser(message.sender.id);
     let replies: string[];
 
     if (!user) {
-      user = createUser(message.sender.id);
-      await save();
+      await createUser(message.sender.id);
       replies = startOnboarding();
     } else if (message.content.type === "text") {
       replies = await handleText(user, message.content.text);
     } else if (message.content.type === "attachment" && message.content.mimeType.startsWith("image/")) {
-      const { content } = message;
-      const file = `${crypto.randomUUID()}${extname(content.name) || ".jpg"}`;
-      await mkdir(PHOTO_DIR, { recursive: true });
-      await Bun.write(`${PHOTO_DIR}/${file}`, await content.read());
-      replies = await handlePhoto(user, file, content.mimeType);
+      replies = await handlePhoto(user, await message.content.read(), message.content.mimeType);
     } else {
       continue;
     }

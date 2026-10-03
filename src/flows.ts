@@ -1,11 +1,17 @@
 import { type Action, type ChatKind, route } from "./llm.ts";
 import {
-  DEFAULT_FIT_CHECK_HOUR,
   type Reminder,
   type User,
+  addItems,
+  addOutfit,
+  addReminder,
+  cancelReminder,
+  listItems,
+  listOutfits,
   localDate,
   pendingReminders,
-  save,
+  removeItem,
+  updateUser,
 } from "./store.ts";
 import { wardrobeUrl } from "./web.ts";
 
@@ -122,19 +128,19 @@ const EXACT_COMMANDS = [
 /** Handle a text message from a user, returning the replies to send. */
 export async function handleText(user: User, text: string): Promise<string[]> {
   if (user.step === "city") {
-    user.city = text.trim();
-    user.step = "done";
-    await save();
+    const city = text.trim();
+    await updateUser(user.id, { city, step: "done" });
+    const hour = user.fitCheckHour;
     return [
-      `Got it, ${user.city}. You're all set.`,
-      `I'll ask for a fit check every day around ${formatHour(user.fitCheckHour ?? DEFAULT_FIT_CHECK_HOUR)}.`,
+      `Got it, ${city}. You're all set.`,
+      hour === null ? "Daily fit checks are off." : `I'll ask for a fit check every day around ${formatHour(hour)}.`,
       HELP,
     ];
   }
 
   // Reminder numbers refer to the list as it stood when they texted, so
   // "cancel 1 and 2" still means the original 1 and 2 after the first cancel.
-  const listed = pendingReminders(user);
+  const listed = await pendingReminders(user.id);
 
   const exact = fastPath(text);
   let actions: Action[];
@@ -145,7 +151,7 @@ export async function handleText(user: User, text: string): Promise<string[]> {
       actions = await route(text, {
         now: new Date(),
         reminders: listed.map((r) => `${r.text} (${formatWhen(r.at)})`),
-        items: user.items.map((i) => i.name),
+        items: (await listItems(user.id)).map((i) => i.name),
       });
     } catch (err) {
       console.error("LLM routing failed:", err instanceof Error ? err.message : err);
@@ -163,15 +169,14 @@ export async function handleText(user: User, text: string): Promise<string[]> {
 async function runAction(user: User, action: Action, listed: Reminder[]): Promise<string[]> {
   switch (action.action) {
     case "add_reminder": {
-      user.reminders.push({ id: crypto.randomUUID(), at: action.at, text: action.text, sent: false });
-      await save();
+      await addReminder(user.id, action.at, action.text);
       return [`Okay, I'll remind you about "${action.text}" ${formatWhen(action.at)}.`];
     }
 
     case "list_reminders": {
-      const hour = user.fitCheckHour === undefined ? DEFAULT_FIT_CHECK_HOUR : user.fitCheckHour;
+      const hour = user.fitCheckHour;
       const lines = [`Daily fit check: ${hour === null ? "off" : formatHour(hour)}`];
-      const pending = pendingReminders(user);
+      const pending = await pendingReminders(user.id);
       if (pending.length) {
         pending.forEach((r, i) => lines.push(`${i + 1}. ${r.text} (${formatWhen(r.at)})`));
         lines.push('Text "cancel 1" to remove one.');
@@ -182,36 +187,31 @@ async function runAction(user: User, action: Action, listed: Reminder[]): Promis
     }
 
     case "cancel_reminder": {
-      const listedTarget = listed[action.number - 1];
-      const target = listedTarget && user.reminders.find((r) => r.id === listedTarget.id && !r.sent);
-      if (!target) return ["I don't see that reminder. Text \"my reminders\" to see the list."];
-      user.reminders = user.reminders.filter((r) => r.id !== target.id);
-      await save();
+      const target = listed[action.number - 1];
+      if (!target || !(await cancelReminder(user.id, target.id))) {
+        return ["I don't see that reminder. Text \"my reminders\" to see the list."];
+      }
       return [`Cancelled: ${target.text}.`];
     }
 
     case "set_fit_check_time":
-      user.fitCheckHour = action.hour;
-      await save();
+      await updateUser(user.id, { fitCheckHour: action.hour });
+      user.fitCheckHour = action.hour; // later actions in the same text see it
       return [`Done. I'll ask for your fit check around ${formatHour(action.hour)} each day.`];
 
     case "stop_fit_checks":
+      await updateUser(user.id, { fitCheckHour: null });
       user.fitCheckHour = null;
-      await save();
       return ['Okay, no more daily fit checks. Text "fit check at 8am" to turn them back on.'];
 
     case "show_wardrobe": {
-      const n = user.items.length;
+      const n = (await listItems(user.id)).length;
       const summary = n ? `${n} item${n === 1 ? "" : "s"}` : "Nothing yet";
       return [`${summary} in your wardrobe: ${wardrobeUrl(user)}`];
     }
 
     case "add_items": {
-      const now = Date.now();
-      for (const item of action.items) {
-        user.items.push({ id: crypto.randomUUID(), name: item.name, category: item.category, addedAt: now });
-      }
-      await save();
+      await addItems(user.id, action.items);
       return [`Added ${action.items.map((i) => i.name).join(", ")}.`];
     }
 
@@ -220,27 +220,29 @@ async function runAction(user: User, action: Action, listed: Reminder[]): Promis
       // ("black jeans" matches "black straight-leg jeans").
       const needle = action.name.toLowerCase();
       const words = needle.split(/[\s-]+/).filter(Boolean);
+      const items = await listItems(user.id);
       const item =
-        user.items.find((i) => i.name.toLowerCase() === needle) ??
-        user.items.find((i) => {
+        items.find((i) => i.name.toLowerCase() === needle) ??
+        items.find((i) => {
           const have = new Set(i.name.toLowerCase().split(/[\s-]+/));
           return words.every((w) => have.has(w));
         });
       if (!item) return [`I couldn't find "${action.name}" in your wardrobe.`];
-      user.items = user.items.filter((i) => i.id !== item.id);
-      await save();
+      await removeItem(user.id, item.id);
       return [`Removed ${item.name}.`];
     }
 
     case "show_profile": {
-      const hour = user.fitCheckHour === undefined ? DEFAULT_FIT_CHECK_HOUR : user.fitCheckHour;
+      const hour = user.fitCheckHour;
+      const [items, outfits] = await Promise.all([listItems(user.id), listOutfits(user.id)]);
       return [
         [
           `Name: ${user.name ?? "not set"}`,
           `City: ${user.city ?? "not set"}`,
           `Daily fit check: ${hour === null ? "off" : formatHour(hour)}`,
-          `Wardrobe: ${plural(user.items.length, "item")}, ${plural(user.photos.length, "fit check")}`,
-          'Change it with "city Detroit", "call me Sam", or "fit check at 8am".',
+          `Wardrobe: ${plural(items.length, "item")}, ${plural(outfits.length, "fit check")}`,
+          `Edit it here: ${wardrobeUrl(user)}#profile`,
+          'Or text "city Detroit", "call me Sam", or "fit check at 8am".',
         ].join("\n"),
       ];
     }
@@ -255,7 +257,7 @@ async function runAction(user: User, action: Action, listed: Reminder[]): Promis
         user.city = action.city;
         changes.push(`your city is now ${action.city}`);
       }
-      await save();
+      await updateUser(user.id, { name: user.name, city: user.city });
       const sentence = changes.join(" and ");
       return [`Got it, ${sentence}.`];
     }
@@ -277,10 +279,9 @@ const CHAT_REPLIES: Record<ChatKind, string> = {
   other: 'Not sure I can help with that. Text "help" to see what I can do.',
 };
 
-export async function handlePhoto(user: User, file: string, mimeType: string): Promise<string[]> {
+export async function handlePhoto(user: User, image: Buffer, mimeType: string): Promise<string[]> {
   if (user.step !== "done") return [ASK_CITY];
-  user.photos.push({ id: crypto.randomUUID(), file, mimeType, at: Date.now() });
-  user.lastFitPhoto = localDate(); // counts as today's fit check, so no ping
-  await save();
+  await addOutfit(user.id, image, mimeType);
+  await updateUser(user.id, { lastFitPhoto: localDate() }); // counts as today's fit check, so no ping
   return ["Saved your fit check. Auto-detecting the items in it is coming soon."];
 }
