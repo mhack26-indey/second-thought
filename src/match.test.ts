@@ -36,11 +36,19 @@ test("a different pattern group is a different item", () => {
   expect(matchWithGroups([{ ...tee, pattern: "logo" }], owned, groups)).toEqual([null]);
 });
 
-test("unknown matches anything, and a texted item's missing second color is ignored", () => {
-  const owned = [own({ source: "text", photo_url: null, color_primary: "unknown", pattern: "unknown" })];
-  expect(matchWithGroups([{ ...tee, color_secondary: "black", pattern: "striped" }], owned, groups)).toEqual([
-    owned[0]!.id,
-  ]);
+test("neighboring shades match, but an exact shade is preferred", () => {
+  const beige = own({ color_primary: "beige" });
+  const white = own({ color_primary: "white" });
+  const cream = { ...tee, color_primary: "cream" };
+  expect(matchWithGroups([cream], [beige], groups)).toEqual([beige.id]);
+  expect(matchWithGroups([{ ...tee, color_primary: "black" }], [beige], groups)).toEqual([null]);
+  expect(matchWithGroups([tee], [beige, white], groups)).toEqual([white.id]);
+});
+
+test("unknown matches anything, and second colors are ignored", () => {
+  const owned = [own({ source: "text", photo_url: null, color_primary: "unknown", pattern: "unknown" }), own({})];
+  expect(matchWithGroups([{ ...tee, pattern: "striped" }], owned, groups)).toEqual([owned[0]!.id]);
+  expect(matchWithGroups([{ ...tee, color_secondary: "gold" }], owned.slice(1), groups)).toEqual([owned[1]!.id]);
 });
 
 test("each owned item matches once, preferring the same fit", () => {

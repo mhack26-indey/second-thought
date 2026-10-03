@@ -81,29 +81,46 @@ Return every name exactly as given.`,
   };
 }
 
-const agrees = (a: string | null, b: string | null) => a === UNKNOWN || b === UNKNOWN || a === b;
+// Neighboring shades the vision model drifts between for the same item
+// (one photo's "off-white" blouse is the next one's "beige").
+const NEIGHBORS = [
+  ["white", "cream"],
+  ["cream", "beige"],
+  ["gray", "silver"],
+  ["light blue", "blue"],
+  ["blue", "navy"],
+  ["red", "burgundy"],
+  ["green", "olive"],
+  ["gold", "yellow"],
+];
+const near = (a: string, b: string) => NEIGHBORS.some(([x, y]) => (a === x && b === y) || (a === y && b === x));
 
-/** Same type, same color and pattern groups; "unknown" matches anything. */
+const agrees = (a: string, b: string) => a === UNKNOWN || b === UNKNOWN || a === b;
+
+/**
+ * Same type, same or neighboring color group, same pattern group; "unknown"
+ * matches anything. Second colors aren't compared: the model is too
+ * inconsistent about them (gold frames on black sunglasses), and pattern
+ * already tells striped from solid.
+ */
 export function sameItem(owned: Item, seen: ExtractedItem, g: Groups): boolean {
-  return (
-    owned.type === seen.type &&
-    agrees(g.color(owned.color_primary), g.color(seen.color_primary)) &&
-    // Texted items never have a second color, so don't hold that against them.
-    (owned.source === "text" || g.color(owned.color_secondary) === g.color(seen.color_secondary)) &&
-    agrees(g.pattern(owned.pattern), g.pattern(seen.pattern))
-  );
+  const [a, b] = [g.color(owned.color_primary)!, g.color(seen.color_primary)!];
+  return owned.type === seen.type && (agrees(a, b) || near(a, b)) && agrees(g.pattern(owned.pattern), g.pattern(seen.pattern));
 }
 
 /**
  * For each seen item, the id of the owned item it is, or null if it's new.
  * Each owned item matches at most once (two black tees in one photo are two
- * tees); among several matches, the one with the same fit wins.
+ * tees). Among several matches, the same color group beats a neighboring
+ * one, then the same fit wins.
  */
 export function matchWithGroups(seen: ExtractedItem[], owned: Item[], g: Groups): (number | null)[] {
   const used = new Set<number>();
+  const score = (o: Item, item: ExtractedItem) =>
+    (agrees(g.color(o.color_primary)!, g.color(item.color_primary)!) ? 0 : 2) + (o.fit === item.fit ? 0 : 1);
   return seen.map((item) => {
     const fits = owned.filter((o) => !used.has(o.id) && sameItem(o, item, g));
-    const match = fits.find((o) => o.fit === item.fit) ?? fits[0];
+    const [match] = fits.sort((x, y) => score(x, item) - score(y, item));
     if (!match) return null;
     used.add(match.id);
     return match.id;
