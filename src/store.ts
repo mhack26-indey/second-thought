@@ -21,7 +21,11 @@ import { type IngestResult, ingestOutfit, visionMatcher } from "./ingest.ts";
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error("DATABASE_URL is not set. Run `vercel env pull` or add it to .env.");
-export const sql = new SQL(url);
+// No prepared statements: Neon's pooler keeps server connections (and their
+// cached plans) across restarts, so after a migration adds a column, an old
+// cached `select * from users` fails with "cached plan must not change result
+// type" on every message.
+export const sql = new SQL(url, { prepare: false });
 
 // One connection pool for both: the closet repo talks through this adapter.
 export const db: Db = {
@@ -31,7 +35,7 @@ export const db: Db = {
 await migrate(db);
 await sql.unsafe(await Bun.file(new URL("./schema.sql", import.meta.url)).text());
 
-export type Step = "city" | "done";
+export type Step = "city" | "city_pick" | "done";
 
 export type { Item } from "./closet/repo.ts";
 
@@ -46,6 +50,7 @@ export interface User {
   fitCheckHour: number | null; // daily ping hour in server local time; null = off
   lastFitPing: string | null; // local date (YYYY-MM-DD) of the last ping
   lastFitPhoto: string | null; // local date of the last photo they sent
+  cityOptions: string[] | null; // places to pick from while step is "city_pick"
 }
 
 export interface Outfit {
@@ -73,6 +78,7 @@ const toUser = (r: any): User => ({
   fitCheckHour: r.fit_check_hour,
   lastFitPing: r.last_fit_ping,
   lastFitPhoto: r.last_fit_photo,
+  cityOptions: r.city_options ? JSON.parse(r.city_options) : null,
 });
 
 // ---- users ----
@@ -93,8 +99,9 @@ export async function createUser(id: string): Promise<User> {
   return (await getUser(id))!;
 }
 
-type UserPatch = Partial<Pick<User, "step" | "name" | "city" | "fitCheckHour" | "lastFitPhoto">>;
+type UserPatch = Partial<Pick<User, "step" | "name" | "city" | "fitCheckHour" | "lastFitPhoto" | "cityOptions">>;
 const COLUMNS: Record<keyof UserPatch, string> = {
+  cityOptions: "city_options",
   step: "step",
   name: "name",
   city: "city",
@@ -104,7 +111,10 @@ const COLUMNS: Record<keyof UserPatch, string> = {
 
 export async function updateUser(id: string, patch: UserPatch): Promise<void> {
   const row = Object.fromEntries(
-    Object.entries(patch).map(([key, value]) => [COLUMNS[key as keyof UserPatch], value]),
+    Object.entries(patch).map(([key, value]) => [
+      COLUMNS[key as keyof UserPatch],
+      key === "cityOptions" && value ? JSON.stringify(value) : value,
+    ]),
   );
   if (Object.keys(row).length) await sql`update users set ${sql(row)} where id = ${id}`;
 }

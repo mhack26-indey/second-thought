@@ -1,5 +1,6 @@
 import QRCode from "qrcode";
 import { CATEGORIES, type Category } from "./closet/categories.ts";
+import { cityFrom, findCities } from "./cities.ts";
 import { PORT, PUBLIC_URL } from "./config.ts";
 import {
   type Item,
@@ -49,9 +50,11 @@ interface PageData {
   outfits: Outfit[];
   reminders: Reminder[];
   saved: boolean;
+  cityChoices?: { typed: string; options: string[] }; // several places matched what they typed
+  cityNotFound?: string;
 }
 
-function page({ user, items: allItems, outfits, reminders: pending, saved }: PageData): string {
+function page({ user, items: allItems, outfits, reminders: pending, saved, cityChoices, cityNotFound }: PageData): string {
   const sections = CATEGORIES.map((cat) => {
     const items = allItems.filter((i) => i.category === cat);
     if (!items.length) return "";
@@ -102,6 +105,7 @@ function page({ user, items: allItems, outfits, reminders: pending, saved }: Pag
   input, select, button { font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; }
   button { background: CanvasText; color: Canvas; border: 0; font-weight: 600; cursor: pointer; }
   .saved { color: #2a9d5c; font-size: 14px; margin: 0; }
+  .error { color: #d1495b; font-size: 14px; margin: 0; }
 </style></head><body>
 <h1>${user.name ? `${esc(user.name)}'s` : "Your"} wardrobe</h1>
 <p class="sub">${plural(allItems.length, "item")} · ${plural(outfits.length, "fit check")}${user.city ? ` · ${esc(user.city)}` : ""}</p>
@@ -114,7 +118,14 @@ ${photos ? `<div class="grid">${photos}</div>` : `<p class="empty">No fit checks
 <form method="post" action="/w/${user.webToken}/profile">
   ${saved ? `<p class="saved">Saved.</p>` : ""}
   <label>Name<input name="name" value="${esc(user.name ?? "")}" maxlength="${MAX_FIELD}" placeholder="What should I call you?"></label>
-  <label>City<input name="city" value="${esc(user.city ?? "")}" maxlength="${MAX_FIELD}" placeholder="Used for season-aware reminders"></label>
+  ${
+    cityChoices
+      ? `<label>Which ${esc(cityChoices.typed)}?<select name="city">${cityChoices.options
+          .map((o) => `<option>${esc(o)}</option>`)
+          .join("")}</select></label>`
+      : `<label>City<input name="city" value="${esc(user.city ?? "")}" maxlength="${MAX_FIELD}" placeholder="Used for season-aware reminders"></label>`
+  }
+  ${cityNotFound ? `<p class="error">I couldn't find a city called "${esc(cityNotFound)}". Adding the state helps, like "Springfield, Illinois".</p>` : ""}
   <label>Daily fit check<select name="fitCheck">${hourOptions}</select></label>
   <button type="submit">Save</button>
 </form>
@@ -193,8 +204,14 @@ export function startWebServer() {
           listOutfits(user.id),
           pendingReminders(user.id),
         ]);
-        const saved = new URL(req.url).searchParams.has("saved");
-        return new Response(page({ user, items, outfits, reminders, saved }), {
+        const params = new URL(req.url).searchParams;
+        const saved = params.has("saved");
+        const typed = params.get("pickCity");
+        // Several places matched the city they typed: list them again to pick from.
+        const options = typed ? (await findCities(typed).catch(() => [])).map((c) => c.label) : [];
+        const cityChoices = typed && options.length > 1 ? { typed, options } : undefined;
+        const cityNotFound = params.get("cityNotFound") ?? undefined;
+        return new Response(page({ user, items, outfits, reminders, saved, cityChoices, cityNotFound }), {
           headers: { "Content-Type": "text/html; charset=utf-8" },
         });
       },
@@ -207,8 +224,20 @@ export function startWebServer() {
 
           // Empty name clears it; empty city keeps the old one (the bot relies on it).
           const patch: Parameters<typeof updateUser>[1] = { name: field("name") || null };
-          const city = field("city");
-          if (city) patch.city = city;
+          // A city is saved only once it's a real place; several matches send
+          // them back to pick one.
+          const city = cityFrom(field("city"));
+          let redirect = `/w/${user.webToken}?saved#profile`;
+          if (city && city !== user.city) {
+            const found = await findCities(city).catch((err) => {
+              console.error("city lookup failed; saving it as typed", err);
+              return [{ label: city, population: 0 }];
+            });
+            const exact = found.find((c) => c.label.toLowerCase() === city.toLowerCase());
+            if (exact || found.length === 1) patch.city = (exact ?? found[0])!.label;
+            else if (found.length) redirect = `/w/${user.webToken}?pickCity=${encodeURIComponent(city)}#profile`;
+            else redirect = `/w/${user.webToken}?cityNotFound=${encodeURIComponent(city)}#profile`;
+          }
           const fitCheck = field("fitCheck");
           const hour = Number(fitCheck);
           if (fitCheck === "off") patch.fitCheckHour = null;
@@ -216,7 +245,7 @@ export function startWebServer() {
 
           await updateUser(user.id, patch);
           // Post/redirect/get so a refresh doesn't resubmit the form.
-          return new Response(null, { status: 303, headers: { Location: `/w/${user.webToken}?saved#profile` } });
+          return new Response(null, { status: 303, headers: { Location: redirect } });
         },
       },
       // Photo ids are random UUIDs, so the URL itself is the access check. It
