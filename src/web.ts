@@ -13,6 +13,7 @@ import {
   impactFor,
   listItems,
   listOutfits,
+  listWears,
   pendingReminders,
   updateUser,
 } from "./store.ts";
@@ -52,26 +53,54 @@ interface PageData {
   outfits: Outfit[];
   reminders: Reminder[];
   impact: Impact;
+  wears: { outfitId: number; itemId: number }[];
   saved: boolean;
   cityChoices?: { typed: string; options: string[] }; // several places matched what they typed
   cityNotFound?: string;
 }
 
-function page({ user, items: allItems, outfits, reminders: pending, impact, saved, cityChoices, cityNotFound }: PageData): string {
+function page({ user, items: allItems, outfits, reminders: pending, impact, wears, saved, cityChoices, cityNotFound }: PageData): string {
+  // Items link to the fit checks they were seen in, and each fit check lists
+  // its items, so you can check what the vision model matched.
+  const outfitById = new Map(outfits.map((o) => [o.id, o]));
+  const itemById = new Map(allItems.map((i) => [i.id, i]));
+  const fitsOf = new Map<number, Outfit[]>();
+  const itemsOf = new Map<number, Item[]>();
+  for (const w of wears) {
+    const outfit = outfitById.get(w.outfitId);
+    const item = itemById.get(w.itemId);
+    if (!outfit || !item) continue;
+    fitsOf.set(item.id, [...(fitsOf.get(item.id) ?? []), outfit]);
+    itemsOf.set(outfit.id, [...(itemsOf.get(outfit.id) ?? []), item]);
+  }
+  const thumbs = (item: Item) => {
+    const fits = (fitsOf.get(item.id) ?? []).filter((o) => o.photoUrl).sort((a, b) => a.at - b.at);
+    if (!fits.length) return "";
+    return `<div class="thumbs">${fits
+      .map((o) => `<a href="#fit-${o.id}" title="${fmtDate(o.at)}"><img src="${esc(o.photoUrl!)}" loading="lazy" alt="Fit check ${fmtDate(o.at)}"></a>`)
+      .join("")}<small>worn ${fits.length}×</small></div>`;
+  };
+
   const sections = CATEGORIES.map((cat) => {
     const items = allItems.filter((i) => i.category === cat);
     if (!items.length) return "";
     return `<section><h2>${SECTION_TITLES[cat]} <span>${items.length}</span></h2><ul>${items
       .map(
         (i) =>
-          `<li><span>${esc(i.description)}${i.location ? ` <small>· ${esc(i.location)}</small>` : ""}</span><time>${fmtDate(i.created_at.getTime())}</time></li>`,
+          `<li id="item-${i.id}"><div><span>${esc(i.description)}${i.location ? ` <small>· ${esc(i.location)}</small>` : ""}</span>${thumbs(i)}</div><time>${fmtDate(i.created_at.getTime())}</time></li>`,
       )
       .join("")}</ul></section>`;
   }).join("");
 
   const photos = outfits
     .filter((p) => p.photoUrl)
-    .map((p) => `<figure><img src="${esc(p.photoUrl!)}" loading="lazy" alt=""><figcaption>${fmtDate(p.at)}</figcaption></figure>`)
+    .map((p) => {
+      const found = itemsOf.get(p.id) ?? [];
+      const list = found.length
+        ? `<ul class="found">${found.map((i) => `<li><a href="#item-${i.id}">${esc(i.description)}</a></li>`).join("")}</ul>`
+        : "";
+      return `<figure id="fit-${p.id}"><img src="${esc(p.photoUrl!)}" loading="lazy" alt="Fit check ${fmtDate(p.at)}"><figcaption>${fmtDate(p.at)}</figcaption>${list}</figure>`;
+    })
     .join("");
 
   const hour = user.fitCheckHour;
@@ -99,10 +128,18 @@ function page({ user, items: allItems, outfits, reminders: pending, impact, save
   li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
   li small { color: var(--muted); }
   time { color: var(--muted); white-space: nowrap; font-size: 14px; }
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-  figure { margin: 0; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px 10px; }
+  figure { margin: 0; min-width: 0; scroll-margin-top: 16px; }
   img { width: 100%; aspect-ratio: 3/4; object-fit: cover; border-radius: 8px; background: var(--line); }
-  figcaption { font-size: 12px; color: var(--muted); text-align: center; }
+  figcaption { font-size: 12px; color: var(--muted); text-align: center; margin: 4px 0 2px; }
+  .found li { display: block; padding: 3px 0; border: 0; font-size: 13px; line-height: 1.3; }
+  .found a, .thumbs a { color: inherit; }
+  .thumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; }
+  .thumbs img { width: 32px; height: 42px; aspect-ratio: auto; border-radius: 4px; display: block; }
+  .thumbs small { color: var(--muted); font-size: 12px; margin-left: 4px; }
+  li[id] { scroll-margin-top: 16px; }
+  :target { animation: flash 2s ease-out; }
+  @keyframes flash { from { background: #f5c54266; } to { background: transparent; } }
   .empty { color: var(--muted); }
   form { display: grid; gap: 12px; }
   label { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
@@ -204,11 +241,12 @@ export function startWebServer() {
       "/w/:token": async (req) => {
         const user = await getUserByToken(req.params.token);
         if (!user) return new Response("Not found", { status: 404 });
-        const [items, outfits, reminders, impact] = await Promise.all([
+        const [items, outfits, reminders, impact, wears] = await Promise.all([
           listItems(user.id),
           listOutfits(user.id),
           pendingReminders(user.id),
           impactFor(user.id),
+          listWears(user.id),
         ]);
         const params = new URL(req.url).searchParams;
         const saved = params.has("saved");
@@ -217,7 +255,7 @@ export function startWebServer() {
         const options = typed ? (await findCities(typed).catch(() => [])).map((c) => c.label) : [];
         const cityChoices = typed && options.length > 1 ? { typed, options } : undefined;
         const cityNotFound = params.get("cityNotFound") ?? undefined;
-        return new Response(page({ user, items, outfits, reminders, impact, saved, cityChoices, cityNotFound }), {
+        return new Response(page({ user, items, outfits, reminders, impact, wears, saved, cityChoices, cityNotFound }), {
           headers: { "Content-Type": "text/html; charset=utf-8" },
         });
       },

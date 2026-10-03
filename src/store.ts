@@ -212,6 +212,14 @@ export async function addFitCheck(
   return { id: outfit.id, photoUrl: url };
 }
 
+/** Which items were worn in which fit check: one row per wear. */
+export async function listWears(userId: string): Promise<{ outfitId: number; itemId: number }[]> {
+  const rows = await sql`
+    select w.outfit_id, w.item_id from wears w join outfits o on o.id = w.outfit_id
+    where o.user_id = ${userId}`;
+  return rows.map((r: any) => ({ outfitId: r.outfit_id, itemId: r.item_id }));
+}
+
 /** Newest first. */
 export async function listOutfits(userId: string): Promise<Outfit[]> {
   const rows = await sql`
