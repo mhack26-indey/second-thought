@@ -109,8 +109,8 @@ async function postWithBackoff(body: unknown): Promise<any> {
 
 /**
  * Sends images + prompt and returns output validated against `schema`.
- * JSON output is forced via a response schema, a fixed seed keeps the same
- * photo giving the same answer where possible, and invalid output is retried once.
+ * JSON output is forced via a response schema, temperature is 0 so the same
+ * photo gives the same answer, and invalid output is retried once.
  */
 export async function vlmJson<T extends z.ZodType>(opts: {
   schema: T;
@@ -124,16 +124,14 @@ export async function vlmJson<T extends z.ZodType>(opts: {
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(opts.schema);
   const body = {
     model: opts.model ?? MODEL,
-    // Vertex doesn't take temperature for Gemini here; a fixed seed keeps
-    // answers as repeatable as it allows.
-    seed: 0,
+    temperature: 0,
     reasoning: { effort: opts.effort ?? "low" },
     response_format: {
       type: "json_schema",
       json_schema: { name: "answer", strict: true, schema: jsonSchema },
     },
-    // Only Google Vertex, and only if it honors the response schema.
-    provider: { only: ["google-vertex"], require_parameters: true },
+    // Only route to providers that honor the response schema.
+    provider: { require_parameters: true },
     messages: [
       ...(opts.system ? [{ role: "system", content: opts.system }] : []),
       {
