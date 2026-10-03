@@ -119,29 +119,28 @@ ${photos ? `<div class="grid">${photos}</div>` : `<p class="empty">No fit checks
 </body></html>`;
 }
 
-// The number people text to start. Set BOT_NUMBER to the line this app sends
-// from (`photon spectrum lines list`); without it the landing page just says
-// the bot is offline rather than showing a QR code that goes nowhere.
-const BOT_NUMBER = process.env.BOT_NUMBER?.trim();
-const START_LINK = BOT_NUMBER ? `sms:${BOT_NUMBER}` : undefined;
+// The number people text to start. Defaults to our Spectrum line; override
+// with BOT_NUMBER if the line changes (`photon spectrum lines list`).
+const BOT_NUMBER = process.env.BOT_NUMBER?.trim() || "+16282679185";
+const START_LINK = `sms:${BOT_NUMBER}`;
+// Pretty-printed for the page; the sms: link keeps the E.164 form.
+const BOT_NUMBER_DISPLAY = /^\+1\d{10}$/.test(BOT_NUMBER)
+  ? BOT_NUMBER.replace(/^\+1(\d{3})(\d{3})(\d{4})$/, "($1) $2-$3")
+  : BOT_NUMBER;
 
 // One QR code, encoded once at startup. Transparent background so only the
 // dark modules are drawn; the card behind them supplies the white and the
 // quiet zone is baked in so phone cameras lock on.
-const qrSvg = START_LINK
-  ? QRCode.toString(START_LINK, {
-      type: "svg",
-      margin: 4,
-      errorCorrectionLevel: "M",
-      color: { dark: "#111111ff", light: "#00000000" },
-    })
-  : undefined;
+const qrSvg = QRCode.toString(START_LINK, {
+  type: "svg",
+  margin: 4,
+  errorCorrectionLevel: "M",
+  color: { dark: "#111111ff", light: "#00000000" },
+});
 
 async function landingPage(): Promise<string> {
-  const start = START_LINK
-    ? `<a class="card" href="${esc(START_LINK)}">${await qrSvg}</a>
-<p class="hint"><span class="desktop">Scan with your phone camera, or text </span><span class="phone">Tap the code above, or text </span><a href="${esc(START_LINK)}">${esc(BOT_NUMBER!)}</a></p>`
-    : `<p class="empty">Not taking texts yet. Check back soon.</p>`;
+  const start = `<a class="card" href="${esc(START_LINK)}">${await qrSvg}</a>
+<p class="hint"><span class="desktop">Scan with your phone camera, or text </span><span class="phone">Tap the code above, or text </span><a href="${esc(START_LINK)}">${esc(BOT_NUMBER_DISPLAY)}</a></p>`;
 
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -163,7 +162,6 @@ async function landingPage(): Promise<string> {
   ul { list-style: none; padding: 0; margin: 0; text-align: left; display: grid; gap: 10px; }
   li { padding: 10px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 15px; }
   li b { color: CanvasText; font-weight: 600; }
-  .empty { color: var(--muted); }
   .phone { display: none; }
   @media (hover: none) and (pointer: coarse) { .desktop { display: none; } .phone { display: inline; } }
 </style></head><body>

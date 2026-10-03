@@ -9,10 +9,12 @@
     "eval": "bun scripts/eval-router.ts"
   },
   "dependencies": {
+    "qrcode": "^1.5.4",
     "spectrum-ts": "^12.10.1"
   },
   "devDependencies": {
-    "typescript": "^5",
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/qrcode": "^1.5.6",
+    "typescript": "^5"
   }
 }
