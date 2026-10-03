@@ -89,6 +89,17 @@ process.on("SIGINT", () => {
     .finally(() => process.exit(0));
 });
 
+// Shows the typing bubble while `work` runs. Unlike space.responding, a
+// failure to start or stop the bubble never stops the reply itself.
+async function withTyping<T>(space: { startTyping(): Promise<void>; stopTyping(): Promise<void> }, work: () => Promise<T>): Promise<T> {
+  await space.startTyping().catch((err) => console.warn("typing indicator failed to start", err));
+  try {
+    return await work();
+  } finally {
+    await space.stopTyping().catch(() => {});
+  }
+}
+
 // `app.messages` is an async iterable. Each tick yields a `space` (the
 // conversation) and an inbound `message`. Reply by awaiting `space.send(...)`.
 for await (const [space, message] of app.messages) {
@@ -96,33 +107,37 @@ for await (const [space, message] of app.messages) {
 
   try {
     const user = await getUser(message.sender.id);
-    let replies: string[];
-    let later: (() => Promise<string[]>) | undefined;
+    const content = message.content;
+    const isText = content.type === "text";
+    const isImage = content.type === "attachment" && content.mimeType.startsWith("image/");
+    if (user && !isText && !isImage) continue; // nothing to answer, so no typing bubble
 
-    if (!user) {
-      await createUser(message.sender.id);
-      replies = startOnboarding(
-        message.sender.id,
-        message.content.type === "text" ? message.content.text : undefined,
-      );
-    } else if (message.content.type === "text") {
-      replies = await handleText(user, message.content.text);
-    } else if (message.content.type === "attachment" && message.content.mimeType.startsWith("image/")) {
-      ({ replies, later } = await handlePhoto(user, await message.content.read(), message.content.mimeType));
-    } else {
-      continue;
-    }
-
-    for (const reply of replies) await space.send(reply);
+    // The typing bubble shows while the reply is worked out (the text model
+    // takes a second or two), so a slow answer doesn't look like no answer.
+    const later = await withTyping(space, async () => {
+      let replies: string[];
+      let later: (() => Promise<string[]>) | undefined;
+      if (!user) {
+        await createUser(message.sender!.id);
+        replies = startOnboarding(message.sender!.id, content.type === "text" ? content.text : undefined);
+      } else if (content.type === "text") {
+        replies = await handleText(user, content.text);
+      } else if (content.type === "attachment") {
+        ({ replies, later } = await handlePhoto(user, await content.read(), content.mimeType));
+      } else {
+        return undefined;
+      }
+      for (const reply of replies) await space.send(reply);
+      return later;
+    });
 
     // Slow follow-ups (the vision model) run off the loop so other messages
-    // aren't stuck behind them.
+    // aren't stuck behind them. The bubble comes back while they run, since
+    // reading a fit check photo can take 5-30s.
     if (later) {
-      void later()
-        .then(async (followUps) => {
-          for (const reply of followUps) await space.send(reply);
-        })
-        .catch((err) => console.error(`follow-up for message ${message.id} failed`, err));
+      void withTyping(space, async () => {
+        for (const reply of await later()) await space.send(reply);
+      }).catch((err) => console.error(`follow-up for message ${message.id} failed`, err));
     }
   } catch (err) {
     console.error(`failed handling message ${message.id}`, err);
