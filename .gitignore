@@ -4,6 +4,10 @@ node_modules
 dist
 *.log
 .DS_Store
+data
+.vercel
+.env*
+!.env.example
 
 # Local test photos (licensed for testing, not redistribution)
 test_images/*

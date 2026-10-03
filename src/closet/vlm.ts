@@ -25,7 +25,14 @@ function getClient(): GoogleGenAI {
   return client;
 }
 
-type MediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+// HEIC/HEIF is what iPhones send; Gemini accepts it as is.
+export type MediaType =
+  | "image/jpeg"
+  | "image/png"
+  | "image/gif"
+  | "image/webp"
+  | "image/heic"
+  | "image/heif";
 
 /** An image as the messaging layer hands it to us: a URL or base64 data. */
 export type ImageInput =
@@ -38,6 +45,8 @@ const EXT_MEDIA_TYPES: Record<string, MediaType> = {
   ".png": "image/png",
   ".gif": "image/gif",
   ".webp": "image/webp",
+  ".heic": "image/heic",
+  ".heif": "image/heif",
 };
 
 export function isSupportedImageFile(path: string): boolean {

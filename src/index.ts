@@ -1,21 +1,127 @@
 import { Spectrum } from "spectrum-ts";
 import { imessage } from "@spectrum-ts/imessage";
+import { fitCheckPrompt, handlePhoto, handleText, startOnboarding } from "./flows.ts";
+import { warmUp } from "./llm.ts";
+import {
+  claimDueReminders,
+  claimFitPing,
+  createUser,
+  fitCheckUsers,
+  getUser,
+  localDate,
+  releaseFitPing,
+  releaseReminder,
+  sql,
+} from "./store.ts";
+import { startWebServer } from "./web.ts";
+
 // Spectrum bridges a single agent loop to many messaging interfaces.
 // Each provider in `providers` adds an interface (terminal TUI, iMessage, …).
 // Docs: https://photon.codes/docs/spectrum-ts
 const app = await Spectrum({
   projectId: process.env.PROJECT_ID!,
   projectSecret: process.env.PROJECT_SECRET!,
-  providers: [
-    // imessage
-    imessage.config(),
-  ],
+  providers: [imessage.config()],
+});
+
+const im = imessage(app);
+
+// Reminder scheduler: the only thing that messages first. Users have opted in
+// by asking for the reminder, so proactive sends are fine.
+async function sendTo(userId: string, text: string) {
+  const space = await im.space.create(await im.user(userId));
+  await space.send(text);
+}
+
+// A daily ping goes out once the user's hour arrives, but only within a few
+// hours of it, so a late restart doesn't send a morning nudge at night.
+const FIT_CHECK_WINDOW_HOURS = 3;
+
+// Claims happen in the database before sending, so a slow send or a second
+// worker can't double-fire. A failed send releases the claim to retry.
+async function sendDueReminders() {
+  for (const reminder of await claimDueReminders()) {
+    try {
+      await sendTo(reminder.userId, `Reminder: ${reminder.text}`);
+    } catch (err) {
+      await releaseReminder(reminder.id);
+      console.error(`reminder ${reminder.id} for ${reminder.userId} failed`, err);
+    }
+  }
+
+  const now = new Date();
+  const today = localDate(now);
+  for (const user of await fitCheckUsers()) {
+    const hoursPast = now.getHours() - user.fitCheckHour!;
+    if (hoursPast < 0 || hoursPast >= FIT_CHECK_WINDOW_HOURS) continue;
+    if (!(await claimFitPing(user.id, today))) continue; // already pinged, or they sent a photo
+    try {
+      await sendTo(user.id, fitCheckPrompt());
+    } catch (err) {
+      await releaseFitPing(user.id);
+      console.error(`fit check ping for ${user.id} failed`, err);
+    }
+  }
+}
+
+// One tick at a time: a slow database or send shouldn't stack up overlapping runs.
+let ticking = false;
+async function tick() {
+  if (ticking) return;
+  ticking = true;
+  try {
+    await sendDueReminders();
+  } catch (err) {
+    console.error("scheduler tick failed", err);
+  } finally {
+    ticking = false;
+  }
+}
+
+startWebServer();
+void warmUp(); // load the model now so the first text isn't slow
+const timer = setInterval(tick, 15_000);
+process.on("SIGINT", () => {
+  clearInterval(timer);
+  void app
+    .stop()
+    .then(() => sql.close())
+    .finally(() => process.exit(0));
 });
 
 // `app.messages` is an async iterable. Each tick yields a `space` (the
 // conversation) and an inbound `message`. Reply by awaiting `space.send(...)`.
 for await (const [space, message] of app.messages) {
-  if (message.content.type === "text") {
-    await space.send(`echo: ${message.content.text}`);
+  if (message.direction === "outbound" || !message.sender) continue;
+
+  try {
+    const user = await getUser(message.sender.id);
+    let replies: string[];
+    let later: (() => Promise<string[]>) | undefined;
+
+    if (!user) {
+      await createUser(message.sender.id);
+      replies = startOnboarding();
+    } else if (message.content.type === "text") {
+      replies = await handleText(user, message.content.text);
+    } else if (message.content.type === "attachment" && message.content.mimeType.startsWith("image/")) {
+      ({ replies, later } = await handlePhoto(user, await message.content.read(), message.content.mimeType));
+    } else {
+      continue;
+    }
+
+    for (const reply of replies) await space.send(reply);
+
+    // Slow follow-ups (the vision model) run off the loop so other messages
+    // aren't stuck behind them.
+    if (later) {
+      void later()
+        .then(async (followUps) => {
+          for (const reply of followUps) await space.send(reply);
+        })
+        .catch((err) => console.error(`follow-up for message ${message.id} failed`, err));
+    }
+  } catch (err) {
+    console.error(`failed handling message ${message.id}`, err);
   }
 }

@@ -10,7 +10,7 @@ const dir = process.argv[2] ?? "test_images";
 const files = (await readdir(dir)).filter(isSupportedImageFile).sort();
 
 if (files.length === 0) {
-  console.error(`No .jpg/.jpeg/.png/.gif/.webp images found in ${dir}/`);
+  console.error(`No .jpg/.jpeg/.png/.gif/.webp/.heic images found in ${dir}/`);
   process.exit(1);
 }
 

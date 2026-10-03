@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS items (
   season          TEXT NOT NULL CHECK (season IN ('warm', 'cold', 'all')),
   description     TEXT NOT NULL,
   photo_url       TEXT,
-  source          TEXT NOT NULL CHECK (source IN ('fit_check', 'closet', 'order')),
+  source          TEXT NOT NULL CHECK (source IN ('fit_check', 'closet', 'order', 'text')),
   purchase_id     TEXT,
   location        TEXT,
   status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'returned', 'removed')),
