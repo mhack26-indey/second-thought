@@ -219,6 +219,20 @@ export async function getOutfit(userId: string, outfitId: number): Promise<Outfi
   return r && { id: r.id, photoUrl: r.photo_url, at: r.created_at.getTime() };
 }
 
+/** Their most recent fit check and the items read from it, for corrections by text. */
+export async function latestFitCheck(userId: string): Promise<{ outfit: Outfit; items: Item[] } | undefined> {
+  const [o] = await sql`
+    select id, photo_url, created_at from outfits where user_id = ${userId}
+    order by created_at desc, id desc limit 1`;
+  if (!o) return undefined;
+  const items = await db.query<Item>(
+    `SELECT i.* FROM items i JOIN wears w ON w.item_id = i.id
+     WHERE w.outfit_id = $1 AND i.user_id = $2 AND i.status = 'active' ORDER BY i.id`,
+    [o.id, userId],
+  );
+  return { outfit: { id: o.id, photoUrl: o.photo_url, at: o.created_at.getTime() }, items };
+}
+
 /** Which items were worn in which fit check: one row per wear. */
 export async function listWears(userId: string): Promise<{ outfitId: number; itemId: number }[]> {
   const rows = await sql`

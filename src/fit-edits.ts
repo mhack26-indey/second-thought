@@ -75,3 +75,19 @@ export async function addItemToOutfit(
   await linkItem(db, userId, outfit.id, saved.id);
   return saved;
 }
+
+/**
+ * "It's not a blouse, it's a t-shirt": fixes what the item is (type,
+ * category, description) and any color or pattern they named. Things they
+ * didn't mention ("unknown") keep what the photo said.
+ */
+export async function relabelItem(db: Db, userId: string, itemId: number, as: ExtractedItem): Promise<Item | undefined> {
+  const [row] = await db.query<Item>(
+    `UPDATE items SET type = $3, category = $4, description = $5,
+       color_primary = CASE WHEN $6 = 'unknown' THEN color_primary ELSE $6 END,
+       pattern = CASE WHEN $7 = 'unknown' THEN pattern ELSE $7 END
+     WHERE id = $2 AND user_id = $1 AND status = 'active' RETURNING *`,
+    [userId, itemId, as.type, as.category, as.description, as.color_primary, as.pattern],
+  );
+  return row;
+}

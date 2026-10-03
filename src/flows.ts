@@ -1,7 +1,8 @@
-import { type Action, type ChatKind, route } from "./llm.ts";
+import { type Action, type ChatKind, colorIn, itemFromName, route } from "./llm.ts";
 import { type ImageInput, type MediaType, visionEnabled } from "./closet/vlm.ts";
 import { type City, cityFrom, findCities } from "./cities.ts";
 import { exactGroups, findItemByName, llmGroups } from "./match.ts";
+import { addItemToOutfit, linkItem, mergeItems, relabelItem, unlinkItem } from "./fit-edits.ts";
 import { WINDOW_DAYS, worthBuying } from "./gaps.ts";
 import { type BotReply, type RecentFitCheck, ShoppingMode } from "./shopping-mode.ts";
 import { readPhoto } from "./photo-intake.ts";
@@ -17,6 +18,7 @@ import {
   cancelReminder,
   db,
   deletePhoto,
+  latestFitCheck,
   listItems,
   listOutfits,
   localDate,
@@ -90,6 +92,7 @@ export const HELP = [
   '• "winter jacket is in the under-bed bin", then "where\'s my winter jacket?"',
   '• "what should I buy?" to find the gap in what you wear',
   '• "do I have this?" then a photo, to check before you buy',
+  '• "you missed my watch" or "that\'s not a blouse, it\'s a tee" to fix your last fit check',
   '• a screenshot of an order, to track its return window ("check returns" to see what to send back)',
   '• "my impact" to see what you skipped buying and got back',
   '• "fit check at 8am" or "stop fit checks"',
@@ -222,10 +225,12 @@ export async function handleText(user: User, text: string): Promise<string[]> {
     actions = [exact];
   } else {
     try {
+      const [items, lastFit] = await Promise.all([listItems(user.id), latestFitCheck(user.id)]);
       actions = await route(text, {
         now: new Date(),
         reminders: listed.map((r) => `${r.text} (${formatWhen(r.at)})`),
-        items: (await listItems(user.id)).map((i) => i.description),
+        items: items.map((i) => i.description),
+        lastFit: lastFit?.items.map((i) => i.description),
       });
     } catch (err) {
       console.error("LLM routing failed:", err instanceof Error ? err.message : err);
@@ -313,6 +318,12 @@ async function runAction(user: User, action: Action, listed: Reminder[]): Promis
       const since = item.location_set_at ? `, since ${fmtDay(item.location_set_at)}` : "";
       return [`Your ${item.description}: ${item.location}${since}.`];
     }
+
+    case "fit_same":
+    case "fit_relabel":
+    case "fit_missing":
+    case "fit_not_there":
+      return [await correctFitCheck(user, action)];
 
     case "worth_buying": {
       const wears = await wornLately(user.id, WINDOW_DAYS);
@@ -422,6 +433,73 @@ export async function handlePhoto(user: User, image: Buffer, mimeType: string): 
     replies: ["Got it, taking a look..."],
     later: () => (fit.work = readPhoto(user.id, outfit, input, fit, photoDeps)),
   };
+}
+
+type Correction = Extract<Action, { action: "fit_same" | "fit_relabel" | "fit_missing" | "fit_not_there" }>;
+
+/**
+ * Fixes what the bot read from their most recent fit check, by text: the
+ * same edits as the wardrobe page's fit check editor (fit-edits.ts).
+ */
+async function correctFitCheck(user: User, fix: Correction): Promise<string> {
+  const latest = await latestFitCheck(user.id);
+  if (!latest) return "I don't have a fit check from you yet. Send a photo of your outfit first.";
+  const { outfit, items: inPhoto } = latest;
+  const listed = inPhoto.length ? inPhoto.map((i) => i.description).join(", ") : "nothing yet";
+  const notThere = (name: string) => `I don't see "${name}" in your last fit check. It has: ${listed}.`;
+
+  if (fix.action === "fit_missing") {
+    const closet = await listItems(user.id);
+    const linkedIds = new Set(inPhoto.map((i) => i.id));
+    const owned = await findItemByName(fix.name, closet.filter((i) => !linkedIds.has(i.id))).catch(() => undefined);
+    if (owned) {
+      await linkItem(db, user.id, outfit.id, owned.id);
+      return `Added your ${owned.description} to your last fit check.`;
+    }
+    const item = await itemFromName(fix.name).catch(() => undefined);
+    if (!item) return `I couldn't tell what kind of item "${fix.name}" is. Try naming it, like "black watch".`;
+    const saved = await addItemToOutfit(db, user.id, outfit, item);
+    return `Added ${saved.description} to your closet and your last fit check.`;
+  }
+
+  const item = await findItemByName(fix.name, inPhoto).catch(() => undefined);
+  // "Forgot to mention I'm wearing my black jeans" can come back as fit_same
+  // for an item that isn't in the photo. If it's something they own, they
+  // mean it's missing from the photo; otherwise it's just not there.
+  if (!item && fix.action === "fit_same") {
+    const linkedIds = new Set(inPhoto.map((i) => i.id));
+    const closet = (await listItems(user.id)).filter((i) => !linkedIds.has(i.id));
+    const owned = await findItemByName(fix.name, closet).catch(() => undefined);
+    if (owned) {
+      await linkItem(db, user.id, outfit.id, owned.id);
+      return `Added your ${owned.description} to your last fit check.`;
+    }
+  }
+  if (!item) return notThere(fix.name);
+
+  if (fix.action === "fit_not_there") {
+    const { removed } = await unlinkItem(db, user.id, outfit.id, item.id);
+    return removed
+      ? `Removed ${item.description}: it only came from that photo.`
+      : `Took ${item.description} off your last fit check.`;
+  }
+
+  if (fix.action === "fit_same") {
+    const closet = await listItems(user.id);
+    const real = await findItemByName(fix.as, closet.filter((i) => i.id !== item.id)).catch(() => undefined);
+    if (real && (await mergeItems(db, user.id, item.id, real.id))) {
+      return `Fixed: that's your ${real.description}, not something new.`;
+    }
+    // Not something they own after all: treat it as "it's actually a ...".
+  }
+
+  // Relabel. Keep the photo's color in the description if they didn't name one.
+  const as = await itemFromName(fix.as).catch(() => undefined);
+  if (!as) return `I couldn't tell what "${fix.as}" is. Try naming the kind of item, like "t-shirt".`;
+  const named = colorIn(fix.as);
+  const description = named || item.color_primary === "unknown" ? as.description : `${item.color_primary} ${as.description.replace(/^(a|an|the) /, "")}`;
+  const fixed = await relabelItem(db, user.id, item.id, { ...as, description });
+  return fixed ? `Fixed: ${item.description} is now ${fixed.description}.` : notThere(fix.name);
 }
 
 /**

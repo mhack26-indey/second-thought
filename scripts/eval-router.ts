@@ -4,7 +4,8 @@ import { route } from "../src/llm.ts";
 const ctx = {
   now: new Date(),
   reminders: ["return the green jacket (Sat Oct 4 1:00 PM)", "check zara refund (Mon Oct 6 9:00 AM)"],
-  items: ["black straight-leg jeans", "gray crewneck", "white sneakers"],
+  items: ["black straight-leg jeans", "gray crewneck", "white sneakers", "grey puma sweatpants", "dark charcoal sweatpants", "short-sleeve beige blouse", "red beanie"],
+  lastFit: ["dark charcoal sweatpants", "short-sleeve beige blouse", "red beanie"],
 };
 // [text, expected action, optional check on the result]. A single message
 // must produce exactly that one action.
@@ -38,6 +39,16 @@ const cases: [string, string, ((a: any) => boolean)?][] = [
   ["what's worth buying next", "worth_buying"],
   ["what should I get to have more outfits", "worth_buying"],
   ["should I buy more pants or tops", "worth_buying"],
+  ["wait the charcoal sweatpants are actually my puma ones", "fit_same", (a) => /charcoal/.test(a.name) && /puma/.test(a.as)],
+  ["those aren't new, that's my grey puma sweatpants", "fit_same", (a) => /puma/.test(a.as)],
+  ["that's not a blouse it's a polo", "fit_relabel", (a) => /blouse/.test(a.name) && /polo/.test(a.as)],
+  ["the blouse is actually a button up shirt", "fit_relabel", (a) => /button/.test(a.as)],
+  ["you missed my silver watch", "fit_missing", (a) => /watch/.test(a.name)],
+  ["I'm also wearing white sneakers in that one", "fit_missing", (a) => /sneakers/.test(a.name)],
+  ["there's no beanie in that photo", "fit_not_there", (a) => /beanie/.test(a.name)],
+  ["the red beanie isn't in the pic", "fit_not_there", (a) => /beanie/.test(a.name)],
+  ["sold my red beanie", "remove_item", (a) => /beanie/.test(a.name)],
+  ["just got a silver watch", "add_items", (a) => a.items[0].type === "watch"],
   ["what can you do", "help"],
   ["what do you know about me", "show_profile"],
   ["I moved to Seattle last week", "update_profile", (a) => a.city === "Seattle" && !a.name],
