@@ -7,3 +7,9 @@ dist
 data
 .vercel
 .env*
+!.env.example
+
+# Local test photos (licensed for testing, not redistribution)
+test_images/*
+!test_images/.gitkeep
+!test_images/ATTRIBUTION.md
