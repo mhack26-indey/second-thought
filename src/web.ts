@@ -56,7 +56,10 @@ function page({ user, items: allItems, outfits, reminders: pending, saved }: Pag
     const items = allItems.filter((i) => i.category === cat);
     if (!items.length) return "";
     return `<section><h2>${SECTION_TITLES[cat]} <span>${items.length}</span></h2><ul>${items
-      .map((i) => `<li>${esc(i.description)}<time>${fmtDate(i.created_at.getTime())}</time></li>`)
+      .map(
+        (i) =>
+          `<li><span>${esc(i.description)}${i.location ? ` <small>· ${esc(i.location)}</small>` : ""}</span><time>${fmtDate(i.created_at.getTime())}</time></li>`,
+      )
       .join("")}</ul></section>`;
   }).join("");
 
@@ -87,6 +90,7 @@ function page({ user, items: allItems, outfits, reminders: pending, saved }: Pag
   h2 span { font-weight: normal; }
   ul { list-style: none; padding: 0; margin: 0; }
   li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  li small { color: var(--muted); }
   time { color: var(--muted); white-space: nowrap; font-size: 14px; }
   .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
   figure { margin: 0; }

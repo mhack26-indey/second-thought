@@ -1,6 +1,14 @@
 import { SQL } from "bun";
 import type { ExtractedItem } from "./closet/extract.ts";
-import { type Item, activeItems, createOutfit, insertItem, setItemStatus } from "./closet/repo.ts";
+import {
+  type Item,
+  activeItems,
+  createOutfit,
+  insertItem,
+  recentWears,
+  setItemLocation,
+  setItemStatus,
+} from "./closet/repo.ts";
 import { PUBLIC_URL } from "./config.ts";
 import { type Db, migrate } from "./db/client.ts";
 import { type IngestResult, ingestOutfit } from "./ingest.ts";
@@ -134,6 +142,15 @@ export async function addTextItems(userId: string, items: ExtractedItem[]): Prom
 
 export async function removeItem(userId: string, itemId: number): Promise<void> {
   await setItemStatus(db, userId, itemId, "removed");
+}
+
+export async function setLocation(userId: string, itemId: number, location: string): Promise<void> {
+  await setItemLocation(db, userId, itemId, location);
+}
+
+/** Items worn in fit checks from the last `days` days, one row per wear. */
+export async function wornLately(userId: string, days: number) {
+  return recentWears(db, userId, days);
 }
 
 // ---- photos and outfits ----

@@ -15,6 +15,7 @@ export interface Item extends ExtractedItem {
   source: ItemSource;
   purchase_id: string | null;
   location: string | null;
+  location_set_at: Date | null;
   status: ItemStatus;
   created_at: Date;
 }
@@ -93,6 +94,35 @@ export async function setItemStatus(
     [itemId, userId, status],
   );
   return rows.length > 0;
+}
+
+/** Where the item is kept; returns false if it isn't the user's. */
+export async function setItemLocation(
+  db: Db,
+  userId: string,
+  itemId: number,
+  location: string,
+): Promise<boolean> {
+  const rows = await db.query(
+    `UPDATE items SET location = $3, location_set_at = now() WHERE id = $1 AND user_id = $2 RETURNING id`,
+    [itemId, userId, location],
+  );
+  return rows.length > 0;
+}
+
+/** Items worn in outfits taken in the last `days` days, one row per wear. */
+export async function recentWears(
+  db: Db,
+  userId: string,
+  days: number,
+): Promise<(Item & { outfit_id: number })[]> {
+  return db.query(
+    `SELECT i.*, w.outfit_id FROM wears w
+       JOIN items i ON i.id = w.item_id
+       JOIN outfits o ON o.id = w.outfit_id
+     WHERE o.user_id = $1 AND o.taken_on >= current_date - $2::int AND i.status = 'active'`,
+    [userId, days],
+  );
 }
 
 export async function createOutfit(
