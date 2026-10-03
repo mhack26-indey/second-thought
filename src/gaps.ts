@@ -24,6 +24,9 @@ export const WINDOW_DAYS = 90;
 
 export function worthBuying(wears: (Item & { outfit_id: number })[], groups: Groups): string {
   const outfits = new Set(wears.map((w) => w.outfit_id)).size;
+  if (outfits === 0) {
+    return "Send me a few fit checks first. I base this on what you actually wear, not just what you own.";
+  }
   if (outfits < MIN_OUTFITS) {
     return `I base this on what you actually wear, and I've only seen ${outfits} fit check${outfits === 1 ? "" : "s"} lately. Send a few more and ask again.`;
   }

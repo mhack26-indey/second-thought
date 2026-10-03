@@ -11,6 +11,7 @@ const wears = (outfits: Item[][]) => outfits.flatMap((items, o) => items.map((i)
 
 test("needs a few fit checks first", () => {
   const tee = item("top", "black");
+  expect(worthBuying([], exactGroups)).toStartWith("Send me a few fit checks first.");
   expect(worthBuying(wears([[tee], [tee]]), exactGroups)).toContain("only seen 2 fit checks");
 });
 
