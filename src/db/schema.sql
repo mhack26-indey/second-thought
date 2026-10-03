@@ -20,6 +20,9 @@ CREATE TABLE IF NOT EXISTS items (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- When `location` was last set ("under-bed bin, since Sep 12").
+ALTER TABLE items ADD COLUMN IF NOT EXISTS location_set_at TIMESTAMPTZ;
+
 -- The one query that has to be fast: candidates for match/dedup.
 CREATE INDEX IF NOT EXISTS items_user_category_idx ON items (user_id, category);
 

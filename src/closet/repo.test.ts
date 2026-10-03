@@ -9,6 +9,8 @@ import {
   candidatesByCategory,
   createOutfit,
   insertItem,
+  recentWears,
+  setItemLocation,
   setItemStatus,
   wearCount,
 } from "./repo.ts";
@@ -111,4 +113,25 @@ test("deleting an item removes its wears", async () => {
   await addWear(db, item.id, outfit.id);
   await db.query(`DELETE FROM items WHERE id = $1`, [item.id]);
   expect(await db.query(`SELECT * FROM wears`)).toEqual([]);
+});
+
+test("setItemLocation saves where it is and when, only for the owner", async () => {
+  const item = await insertItem(db, { ...jeans, user_id: "u1", source: "text" });
+  expect(await setItemLocation(db, "u2", item.id, "hall closet")).toBe(false);
+  expect(await setItemLocation(db, "u1", item.id, "under-bed bin")).toBe(true);
+  const [saved] = await activeItems(db, "u1");
+  expect(saved!.location).toBe("under-bed bin");
+  expect(saved!.location_set_at).toBeInstanceOf(Date);
+});
+
+test("recentWears returns active items from recent outfits", async () => {
+  const kept = await insertItem(db, { ...jeans, user_id: "u1", source: "fit_check" });
+  const gone = await insertItem(db, { ...hoodie, user_id: "u1", source: "fit_check" });
+  const today = await createOutfit(db, { user_id: "u1", taken_on: new Date() });
+  const old = await createOutfit(db, { user_id: "u1", taken_on: "2020-01-01" });
+  for (const o of [today, old]) for (const i of [kept, gone]) await addWear(db, i.id, o.id);
+  await setItemStatus(db, "u1", gone.id, "removed");
+
+  const rows = await recentWears(db, "u1", 90);
+  expect(rows.map((r) => [r.id, r.outfit_id])).toEqual([[kept.id, today.id]]);
 });

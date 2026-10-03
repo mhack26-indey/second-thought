@@ -1,7 +1,8 @@
 import { type Action, type ChatKind, route } from "./llm.ts";
 import { type ExtractedItem, extractItems } from "./closet/extract.ts";
 import type { ImageInput, MediaType } from "./closet/vlm.ts";
-import { findItemByName } from "./match.ts";
+import { exactGroups, findItemByName, llmGroups } from "./match.ts";
+import { WINDOW_DAYS, worthBuying } from "./gaps.ts";
 import {
   type Item,
   type Reminder,
@@ -16,6 +17,8 @@ import {
   localDate,
   pendingReminders,
   removeItem,
+  setLocation,
+  wornLately,
   updateUser,
 } from "./store.ts";
 import { wardrobeUrl } from "./web.ts";
@@ -79,6 +82,8 @@ export const HELP = [
   '• "I just got black jeans" to add clothes',
   '• "remind me tomorrow to return the jacket"',
   '• "my reminders" to see your schedule',
+  '• "winter jacket is in the under-bed bin", then "where\'s my winter jacket?"',
+  '• "what should I buy?" to find the gap in what you wear',
   '• "fit check at 8am" or "stop fit checks"',
   '• "my profile" to see your info, "city Detroit" or "call me Sam" to change it',
   "Or send a fit check photo.",
@@ -221,26 +226,36 @@ async function runAction(user: User, action: Action, listed: Reminder[]): Promis
     }
 
     case "remove_item": {
-      // Exact name first, then any item containing every word they used
-      // ("black jeans" matches "black straight-leg jeans").
-      const needle = action.name.toLowerCase();
-      const words = needle.split(/[\s-]+/).filter(Boolean);
-      const items = await listItems(user.id);
-      const item =
-        items.find((i) => i.description.toLowerCase() === needle) ??
-        items.find((i) => {
-          const have = new Set(i.description.toLowerCase().split(/[\s-]+/));
-          return words.every((w) => have.has(w));
-        });
-      // Different words for the same thing ("gray sweater" for a grey
-      // crewneck) need the model.
-      const found = item ?? (await findItemByName(action.name, items).catch((err) => {
-          console.error("item lookup by name failed", err);
-          return undefined;
-        }));
-      if (!found) return [`I couldn't find "${action.name}" in your wardrobe.`];
-      await removeItem(user.id, found.id);
-      return [`Removed ${found.description}.`];
+      const item = await findOwned(user.id, action.name);
+      if (!item) return [`I couldn't find "${action.name}" in your wardrobe.`];
+      await removeItem(user.id, item.id);
+      return [`Removed ${item.description}.`];
+    }
+
+    case "set_location": {
+      const item = await findOwned(user.id, action.name);
+      if (!item) return [`I couldn't find "${action.name}" in your wardrobe. Add it first, like "I have a ${action.name}".`];
+      await setLocation(user.id, item.id, action.location);
+      return [`Got it. ${capitalize(item.description)}: ${action.location}.`];
+    }
+
+    case "find_item": {
+      const item = await findOwned(user.id, action.name);
+      if (!item) return [`I couldn't find "${action.name}" in your wardrobe.`];
+      if (!item.location) {
+        return [`I don't know where your ${item.description} is. Next time, text me something like "${item.description} is in the hall closet".`];
+      }
+      const since = item.location_set_at ? `, since ${fmtDay(item.location_set_at)}` : "";
+      return [`Your ${item.description}: ${item.location}${since}.`];
+    }
+
+    case "worth_buying": {
+      const wears = await wornLately(user.id, WINDOW_DAYS);
+      const groups = await llmGroups(wears).catch((err) => {
+        console.error("color grouping failed", err);
+        return exactGroups;
+      });
+      return [worthBuying(wears, groups)];
     }
 
     case "show_profile": {
@@ -343,6 +358,34 @@ function oneAtATime<T>(userId: string, work: () => Promise<T>): Promise<T> {
   });
   return run;
 }
+
+/**
+ * The item someone means by "the gray sweater": exact name, then any item
+ * containing every word they used ("black jeans" matches "black straight-leg
+ * jeans"), then the local model for different words for the same thing.
+ */
+async function findOwned(userId: string, name: string): Promise<Item | undefined> {
+  const needle = name.toLowerCase();
+  const words = needle.split(/[\s-]+/).filter(Boolean);
+  const items = await listItems(userId);
+  const item =
+    items.find((i) => i.description.toLowerCase() === needle) ??
+    items.find((i) => {
+      const have = new Set(i.description.toLowerCase().split(/[\s-]+/));
+      return words.every((w) => have.has(w));
+    });
+  return (
+    item ??
+    (await findItemByName(name, items).catch((err) => {
+      console.error("item lookup by name failed", err);
+      return undefined;
+    }))
+  );
+}
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+const fmtDay = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
 /** "black jeans"; skips colors a texted item never mentioned. */
 function itemName(item: Item): string {

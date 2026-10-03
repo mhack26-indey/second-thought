@@ -42,6 +42,9 @@ export type Action =
   | { action: "show_wardrobe" }
   | { action: "add_items"; items: ExtractedItem[] }
   | { action: "remove_item"; name: string }
+  | { action: "set_location"; name: string; location: string }
+  | { action: "find_item"; name: string }
+  | { action: "worth_buying" }
   | { action: "show_profile" }
   | { action: "update_profile"; city?: string; name?: string }
   | { action: "help" }
@@ -65,6 +68,9 @@ Possible actions:
 {"action":"show_wardrobe"}   (their closet / wardrobe / what they own)
 {"action":"add_items","items":[{"type":"<kind of item>","color":"<if they said>","pattern":"<if they said>","fit":"<if they said>","description":"<the item in their words>"}]}
 {"action":"remove_item","name":"<item exactly as written in their items>"}
+{"action":"set_location","name":"<the item, as written in their items if it's there>","location":"<where they put it, in their words>"}   (they say where they keep or put something)
+{"action":"find_item","name":"<the item, as written in their items if it's there>"}   (they ask where something is)
+{"action":"worth_buying"}   (they ask what they should buy, get next, or are missing)
 {"action":"show_profile"}   (their info / profile / settings)
 {"action":"update_profile","city":"<new city, optional>","name":"<what to call them, optional>"}   (they moved, or tell you their name)
 {"action":"help"}   (they ask what the bot can do)
@@ -74,7 +80,7 @@ Rules:
 - Use add_items only when they say they own, bought, or got clothes. Leave out color, pattern, or fit if they didn't say it. Include every item they mention, even ones already in their items (duplicates are handled later).
 - "type" is the kind of item in a word or two: jeans, hoodie, sneakers, blazer, earrings...
 - Do the reminder time math in fields, never by hand: "tonight at 9" is days_from_now 0, time "21:00".
-- Questions about how clothes look or what to wear are always chat with kind "style".
+- Questions about how clothes look or what to wear are always chat with kind "style". Questions about what to buy are worth_buying.
 - Never repeat an action or add one they didn't ask for.`;
 
 // Few-shot examples, formatted exactly like real requests.
@@ -111,6 +117,12 @@ const SINGLE_EXAMPLES: [string, object][] = [
   }],
   ["donated the gray sweater", { action: "remove_item", name: "gray crewneck" }],
   ["show me my closet", { action: "show_wardrobe" }],
+  ["put my winter jacket in the under-bed bin", { action: "set_location", name: "winter jacket", location: "under-bed bin" }],
+  ["the gray crewneck is at my mom's", { action: "set_location", name: "gray crewneck", location: "my mom's" }],
+  ["where's my winter jacket", { action: "find_item", name: "winter jacket" }],
+  ["where did I put the black jeans?", { action: "find_item", name: "black jeans" }],
+  ["what should I actually buy?", { action: "worth_buying" }],
+  ["what am I missing in my closet", { action: "worth_buying" }],
   ["what info do you have on me", { action: "show_profile" }],
   ["I just moved to Chicago", { action: "update_profile", city: "Chicago" }],
   ["my name's Sam btw", { action: "update_profile", name: "Sam" }],
@@ -359,6 +371,15 @@ function validate(raw: any, now: Date): Action | undefined {
       const name = str(raw.name);
       return name ? { action: "remove_item", name } : undefined;
     }
+    case "set_location": {
+      const name = str(raw.name);
+      const location = str(raw.location);
+      return name && location ? { action: "set_location", name, location } : undefined;
+    }
+    case "find_item": {
+      const name = str(raw.name);
+      return name ? { action: "find_item", name } : undefined;
+    }
     case "update_profile": {
       const city = str(raw.city);
       const name = str(raw.name);
@@ -371,6 +392,7 @@ function validate(raw: any, now: Date): Action | undefined {
     case "stop_fit_checks":
     case "show_wardrobe":
     case "show_profile":
+    case "worth_buying":
     case "help":
       return { action: raw.action };
     default:
