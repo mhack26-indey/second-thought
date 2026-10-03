@@ -71,7 +71,7 @@ export function formatHour(hour: number): string {
 function formatWhen(at: number): string {
   const d = new Date(at);
   const day = localDate(d) === localDate() ? "today" : d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-  return `${day} ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+  return `${day} at ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -269,7 +269,8 @@ async function runAction(user: User, action: Action, listed: Reminder[]): Promis
       const item = await findOwned(user.id, action.name);
       if (!item) return [`I couldn't find "${action.name}" in your wardrobe.`];
       if (!item.location) {
-        return [`I don't know where your ${item.description} is. Next time, text me something like "${item.description} is in the hall closet".`];
+        // Worded so it reads right for "jacket" and "sneakers" alike.
+        return [`I don't have a spot saved for your ${item.description}. Next time, text me something like "put the ${item.description} in the hall closet".`];
       }
       const since = item.location_set_at ? `, since ${fmtDay(item.location_set_at)}` : "";
       return [`Your ${item.description}: ${item.location}${since}.`];
