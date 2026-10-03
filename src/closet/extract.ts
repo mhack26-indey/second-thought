@@ -16,7 +16,14 @@ export const ModelItemSchema = z.object({
   description: z.string(),
 });
 
+// What kind of photo it is, read in the same call so routing costs nothing:
+// a fit check (worn clothes), an order screenshot (a retailer's order or
+// receipt page), or a product shot (a store photo or listing, nobody wearing it).
+export const IMAGE_KINDS = ["fit_check", "order_screenshot", "product"] as const;
+export type ImageKind = (typeof IMAGE_KINDS)[number];
+
 export const ExtractionSchema = z.object({
+  image_kind: z.enum(IMAGE_KINDS),
   items: z.array(ModelItemSchema),
 });
 
@@ -27,7 +34,14 @@ const typeList = Object.entries(CATEGORY_TYPES)
   .map(([category, types]) => `- ${category}: ${types.join(", ")}`)
   .join("\n");
 
-const EXTRACT_PROMPT = `List every clothing item, pair of shoes, accessory and piece of jewelry visibly worn or shown in this photo.
+const EXTRACT_PROMPT = `First, image_kind:
+- order_screenshot: a screenshot of an online order, order confirmation, receipt or shipping email (a retailer's page or app listing items bought, usually with prices)
+- product: a product photo or store listing, or clothes photographed on a hanger, shelf or rack, with nobody wearing them
+- fit_check: anything else, usually a person showing what they're wearing
+
+If it's an order_screenshot, return an empty items list; the order is read separately. Otherwise:
+
+List every clothing item, pair of shoes, accessory and piece of jewelry visibly worn or shown in this photo.
 
 For each item give:
 - type: exactly one of these, grouped by category:
@@ -46,15 +60,23 @@ Rules:
 - If there are no clothing items, return an empty list.
 - Use lowercase for every field.`;
 
-export async function extractItems(
-  image: string | ImageInput,
-): Promise<ExtractedItem[]> {
+export interface PhotoExtraction {
+  kind: ImageKind;
+  items: ExtractedItem[];
+}
+
+/** One vision call: what kind of photo it is, and the items in it. */
+export async function extractPhoto(image: string | ImageInput): Promise<PhotoExtraction> {
   const result = await vlmJson({
     schema: ExtractionSchema,
     images: [toImageInput(image)],
     prompt: EXTRACT_PROMPT,
   });
-  return result.items.map(withCategory);
+  return { kind: result.image_kind, items: result.items.map(withCategory) };
+}
+
+export async function extractItems(image: string | ImageInput): Promise<ExtractedItem[]> {
+  return (await extractPhoto(image)).items;
 }
 
 export function withCategory(item: ModelItem): ExtractedItem {

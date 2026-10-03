@@ -11,8 +11,7 @@ import {
 } from "./closet/repo.ts";
 import { PUBLIC_URL } from "./config.ts";
 import { type Db, migrate } from "./db/client.ts";
-import type { ImageInput } from "./closet/vlm.ts";
-import { type IngestResult, ingestOutfit, visionMatcher } from "./ingest.ts";
+import { type Impact, impactTotals } from "./impact.ts";
 
 // Everything lives in Neon Postgres. The closet tables (items, outfits, wears)
 // belong to the closet module (db/schema.sql, closet/repo.ts); the bot's own
@@ -164,12 +163,16 @@ export async function wornLately(userId: string, days: number) {
   return recentWears(db, userId, days);
 }
 
+export async function impactFor(userId: string): Promise<Impact> {
+  return impactTotals(db, userId);
+}
+
 // ---- photos and outfits ----
 
 /** Public, unguessable URL for a stored photo; the vision model can fetch it. */
 export const photoUrl = (photoId: string) => `${PUBLIC_URL}/photos/${photoId}`;
 
-async function addPhoto(userId: string, image: Buffer, mimeType: string): Promise<string> {
+export async function addPhoto(userId: string, image: Buffer, mimeType: string): Promise<string> {
   const [row] = await sql`
     insert into photos (user_id, image, mime_type) values (${userId}, ${image}, ${mimeType}) returning id`;
   return row.id;
@@ -203,16 +206,6 @@ export async function addFitCheck(
   const url = photoUrl(await addPhoto(userId, image, mimeType));
   const outfit = await createOutfit(db, { user_id: userId, taken_on: localDate(), photo_url: url });
   return { id: outfit.id, photoUrl: url };
-}
-
-/** Matches the items seen in a fit check to the closet, adding new ones. */
-export async function ingestFitCheck(
-  userId: string,
-  outfit: { id: number; photoUrl: string },
-  seen: ExtractedItem[],
-  image?: ImageInput,
-): Promise<IngestResult> {
-  return ingestOutfit(db, userId, outfit, seen, image ? visionMatcher(image) : undefined);
 }
 
 /** Newest first. */

@@ -55,3 +55,53 @@ create table if not exists return_policies (
 -- Places offered when a city name matched several ("Detroit, Michigan",
 -- "Detroit, Texas"...), as a JSON array, while step = 'city_pick'.
 alter table users add column if not exists city_options text;
+
+-- Where to start a return, linked in the reply to "return".
+alter table return_policies add column if not exists returns_url text;
+
+-- Return nudges: when the "hasn't shown up in a fit check" nudge went out
+-- (claimed before sending, so it goes once), and the keep/return answer.
+alter table purchases add column if not exists nudged_at timestamptz;
+alter table purchases add column if not exists nudge_answer text;  -- keep | return
+
+-- The impact counter. 'avoided': a shopping check found something they
+-- already own (amount = that item's order price, if it came from an order).
+-- 'recovered': a purchase went back (amount = its price), counted once per
+-- purchase even as it moves from 'returning' to 'returned'. No foreign keys
+-- on items or purchases, so taking back a fit check can't erase a count.
+create table if not exists impact_events (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     text not null references users (id) on delete cascade,
+  kind        text not null check (kind in ('avoided', 'recovered')),
+  amount      numeric(10, 2),
+  item_id     integer not null,
+  purchase_id uuid,
+  created_at  timestamptz not null default now()
+);
+create index if not exists impact_events_user on impact_events (user_id);
+create unique index if not exists impact_events_recovered_once on impact_events (purchase_id) where kind = 'recovered';
+
+-- Return windows for retailers students use most, in days from the order
+-- date. Standard online policy as of Oct 2026. Replies tell people to verify
+-- on the retailer's site, since policies change and vary by item and member
+-- tier. Re-running updates the rows, so editing one here is the migration.
+-- Returns pages checked Oct 3, 2026 (H&M, Adidas, American Eagle, Urban
+-- Outfitters and Lululemon block automated checks, so theirs are unchecked).
+insert into return_policies (retailer, return_days, notes, returns_url) values
+  ('Amazon',            30, 'most clothing, from delivery',          'https://www.amazon.com/returns'),
+  ('Target',            90, 'most items',                            'https://www.target.com/returns'),
+  ('H&M',               30, null,                                    'https://www2.hm.com/en_us/customer-service/returns.html'),
+  ('Zara',              30, null,                                    'https://www.zara.com/us/en/help-center/HowToReturn'),
+  ('Uniqlo',            30, null,                                    'https://www.uniqlo.com/us/en/returns'),
+  ('Nike',              60, null,                                    'https://www.nike.com/help/a/returns-policy'),
+  ('Adidas',            30, null,                                    'https://www.adidas.com/us/help/us-returns-refunds'),
+  ('Abercrombie',       30, null,                                    'https://www.abercrombie.com/shop/us/help/returns'),
+  ('American Eagle',    30, null,                                    'https://www.ae.com/us/en/content/help/returns'),
+  ('Urban Outfitters',  30, null,                                    'https://www.urbanoutfitters.com/help/returns'),
+  ('Lululemon',         30, 'unworn with tags',                      'https://shop.lululemon.com/help/returns'),
+  ('Gap',               30, null,                                    'https://www.gap.com/returns'),
+  ('Old Navy',          30, null,                                    'https://oldnavy.gap.com/returns'),
+  ('Nordstrom',         30, 'no fixed window, handled case by case', 'https://www.nordstrom.com/browse/services/return-policy'),
+  ('Shein',             30, null,                                    'https://us.shein.com/Return-Policy-a-281.html')
+on conflict (retailer) do update
+  set return_days = excluded.return_days, notes = excluded.notes, returns_url = excluded.returns_url;

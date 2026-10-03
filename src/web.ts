@@ -2,6 +2,7 @@ import QRCode from "qrcode";
 import { CATEGORIES, type Category } from "./closet/categories.ts";
 import { cityFrom, findCities } from "./cities.ts";
 import { PORT, PUBLIC_URL } from "./config.ts";
+import { type Impact, impactSummary } from "./impact.ts";
 import {
   type Item,
   type Outfit,
@@ -9,6 +10,7 @@ import {
   type User,
   getPhoto,
   getUserByToken,
+  impactFor,
   listItems,
   listOutfits,
   pendingReminders,
@@ -49,12 +51,13 @@ interface PageData {
   items: Item[];
   outfits: Outfit[];
   reminders: Reminder[];
+  impact: Impact;
   saved: boolean;
   cityChoices?: { typed: string; options: string[] }; // several places matched what they typed
   cityNotFound?: string;
 }
 
-function page({ user, items: allItems, outfits, reminders: pending, saved, cityChoices, cityNotFound }: PageData): string {
+function page({ user, items: allItems, outfits, reminders: pending, impact, saved, cityChoices, cityNotFound }: PageData): string {
   const sections = CATEGORIES.map((cat) => {
     const items = allItems.filter((i) => i.category === cat);
     if (!items.length) return "";
@@ -89,6 +92,7 @@ function page({ user, items: allItems, outfits, reminders: pending, saved, cityC
   body { font: 16px/1.4 -apple-system, system-ui, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px 16px 48px; }
   h1 { font-size: 28px; margin: 0 0 4px; }
   .sub { color: var(--muted); margin: 0 0 24px; }
+  .impact { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 28px 0 8px; }
   h2 span { font-weight: normal; }
   ul { list-style: none; padding: 0; margin: 0; }
@@ -108,6 +112,7 @@ function page({ user, items: allItems, outfits, reminders: pending, saved, cityC
   .error { color: #d1495b; font-size: 14px; margin: 0; }
 </style></head><body>
 <h1>${user.name ? `${esc(user.name)}'s` : "Your"} wardrobe</h1>
+<p class="impact">${impactSummary(impact)}</p>
 <p class="sub">${plural(allItems.length, "item")} · ${plural(outfits.length, "fit check")}${user.city ? ` · ${esc(user.city)}` : ""}</p>
 ${sections || `<p class="empty">No items yet. Text something like "I have black straight-leg jeans".</p>`}
 <h2>Fit checks</h2>
@@ -199,10 +204,11 @@ export function startWebServer() {
       "/w/:token": async (req) => {
         const user = await getUserByToken(req.params.token);
         if (!user) return new Response("Not found", { status: 404 });
-        const [items, outfits, reminders] = await Promise.all([
+        const [items, outfits, reminders, impact] = await Promise.all([
           listItems(user.id),
           listOutfits(user.id),
           pendingReminders(user.id),
+          impactFor(user.id),
         ]);
         const params = new URL(req.url).searchParams;
         const saved = params.has("saved");
@@ -211,7 +217,7 @@ export function startWebServer() {
         const options = typed ? (await findCities(typed).catch(() => [])).map((c) => c.label) : [];
         const cityChoices = typed && options.length > 1 ? { typed, options } : undefined;
         const cityNotFound = params.get("cityNotFound") ?? undefined;
-        return new Response(page({ user, items, outfits, reminders, saved, cityChoices, cityNotFound }), {
+        return new Response(page({ user, items, outfits, reminders, impact, saved, cityChoices, cityNotFound }), {
           headers: { "Content-Type": "text/html; charset=utf-8" },
         });
       },

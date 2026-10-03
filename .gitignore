@@ -13,3 +13,7 @@ data
 test_images/*
 !test_images/.gitkeep
 !test_images/ATTRIBUTION.md
+
+# Demo photos (people's real photos; see demo_images/README.md)
+demo_images/*
+!demo_images/README.md

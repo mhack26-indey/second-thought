@@ -1,10 +1,12 @@
 import { type Action, type ChatKind, route } from "./llm.ts";
-import { type ExtractedItem, extractItems } from "./closet/extract.ts";
 import { type ImageInput, type MediaType, visionEnabled } from "./closet/vlm.ts";
 import { type City, cityFrom, findCities } from "./cities.ts";
 import { exactGroups, findItemByName, llmGroups } from "./match.ts";
 import { WINDOW_DAYS, worthBuying } from "./gaps.ts";
 import { type BotReply, type RecentFitCheck, ShoppingMode } from "./shopping-mode.ts";
+import { readPhoto } from "./photo-intake.ts";
+import { handleReturnsText } from "./returns.ts";
+import { impactReply, impactTotals, isImpactAsk } from "./impact.ts";
 import {
   type Item,
   type Reminder,
@@ -12,7 +14,6 @@ import {
   addFitCheck,
   addReminder,
   addTextItems,
-  ingestFitCheck,
   cancelReminder,
   db,
   deletePhoto,
@@ -89,6 +90,8 @@ export const HELP = [
   '• "winter jacket is in the under-bed bin", then "where\'s my winter jacket?"',
   '• "what should I buy?" to find the gap in what you wear',
   '• "do I have this?" then a photo, to check before you buy',
+  '• a screenshot of an order, to track its return window ("check returns" to see what to send back)',
+  '• "my impact" to see what you skipped buying and got back',
   '• "fit check at 8am" or "stop fit checks"',
   '• "my profile" to see your info, "city Detroit" or "call me Sam" to change it',
   "Or send a fit check photo.",
@@ -368,11 +371,19 @@ const CHAT_REPLIES: Record<ChatKind, string> = {
 export type { BotReply, Reply } from "./shopping-mode.ts";
 
 const shopping = new ShoppingMode({ db });
+const photoDeps = { db, shop: shopping.match.bind(shopping) };
 
 /** Handle a text message; "do I have this?" may answer later, after the vision model. */
 export async function handleTextMessage(user: User, text: string): Promise<BotReply> {
-  const shop = user.step === "done" ? shopping.onText(user.id, text) : undefined;
-  return shop ?? { replies: await handleText(user, text) };
+  if (user.step === "done") {
+    // "keep" / "return" after a nudge, "returned it", "check returns" (returns.ts)
+    const returns = await handleReturnsText(db, user.id, text, localDate());
+    if (returns) return { replies: returns };
+    if (isImpactAsk(text)) return { replies: [impactReply(await impactTotals(db, user.id))] };
+    const shop = shopping.onText(user.id, text);
+    if (shop) return shop;
+  }
+  return { replies: await handleText(user, text) };
 }
 
 const VISION_TYPES = new Set<string>(["image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif"]);
@@ -405,53 +416,12 @@ export async function handlePhoto(user: User, image: Buffer, mimeType: string): 
     },
   };
   shopping.fitCheckSaved(user.id, fit);
+  // Saved as a fit check until the vision model says otherwise: an order
+  // screenshot comes back out and goes to order intake (photo-intake.ts).
   return {
-    replies: ["Saved your fit check. Checking what you're wearing..."],
-    later: () => (fit.work = detectItems(user.id, outfit, input, fit)),
+    replies: ["Got it, taking a look..."],
+    later: () => (fit.work = readPhoto(user.id, outfit, input, fit, photoDeps)),
   };
-}
-
-async function detectItems(
-  userId: string,
-  outfit: { id: number; photoUrl: string },
-  image: ImageInput,
-  fit: RecentFitCheck,
-): Promise<string[]> {
-  // The photo is already saved, so a vision failure only costs the item list.
-  let seen: ExtractedItem[];
-  try {
-    seen = await extractItems(image);
-  } catch (err) {
-    console.error(`item extraction failed for outfit ${outfit.id}`, err);
-    if (fit.cancelled) return [];
-    return ["I couldn't make out the items in that one, but the photo is saved."];
-  }
-  fit.seen = seen;
-  if (fit.cancelled) return []; // it turned out to be a shopping photo
-  if (!seen.length) return ["I couldn't spot any clothes in that photo."];
-
-  const result = await oneAtATime(userId, async () =>
-    fit.cancelled ? undefined : ingestFitCheck(userId, outfit, seen, image),
-  );
-  if (!result) return [];
-  const { worn, added } = result;
-  const lines: string[] = [];
-  if (worn.length) lines.push(`Wearing: ${worn.map(itemName).join(", ")}.`);
-  if (added.length) lines.push(`New to your closet: ${added.map(itemName).join(", ")}.`);
-  return [lines.join(" ")];
-}
-
-// Two photos sent back to back extract in parallel, but their ingests run in
-// order; otherwise both could add the same new jacket.
-const userQueues = new Map<string, Promise<unknown>>();
-function oneAtATime<T>(userId: string, work: () => Promise<T>): Promise<T> {
-  const run = (userQueues.get(userId) ?? Promise.resolve()).then(work, work);
-  const tail = run.catch(() => {});
-  userQueues.set(userId, tail);
-  void tail.then(() => {
-    if (userQueues.get(userId) === tail) userQueues.delete(userId);
-  });
-  return run;
 }
 
 /**
@@ -481,8 +451,3 @@ async function findOwned(userId: string, name: string): Promise<Item | undefined
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 const fmtDay = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-
-/** "black jeans"; skips colors a texted item never mentioned. */
-function itemName(item: Item): string {
-  return item.color_primary === "unknown" ? item.type : `${item.color_primary} ${item.type}`;
-}
