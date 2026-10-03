@@ -1,6 +1,7 @@
 import { type Action, type ChatKind, route } from "./llm.ts";
 import { type ExtractedItem, extractItems } from "./closet/extract.ts";
 import type { ImageInput, MediaType } from "./closet/vlm.ts";
+import { type City, cityFrom, findCities } from "./cities.ts";
 import { exactGroups, findItemByName, llmGroups } from "./match.ts";
 import { WINDOW_DAYS, worthBuying } from "./gaps.ts";
 import {
@@ -146,32 +147,62 @@ const EXACT_COMMANDS = [
   '• "my profile" / "city Detroit" / "my name is Sam"',
 ].join("\n");
 
-/** "I'm in Ann Arbor!" -> "Ann Arbor": the onboarding answer, minus the sentence around it. */
-export function cityFrom(text: string): string {
-  const city = text
-    .trim()
-    .replace(/[.!]+$/, "")
-    .replace(/^(?:(?:i'?m|i am|im|we'?re|we are)\s+)?(?:(?:currently|living|based|located|staying)\s+)?(?:in|at|from)\s+/i, "")
-    .replace(/^(?:i|we)\s+live\s+in\s+/i, "")
-    .replace(/^(?:it'?s|its)\s+/i, "")
-    .trim();
-  return city || text.trim();
+/**
+ * Looks up what they typed as a city. One real match is saved; several are
+ * listed for them to pick by number; none gets the question again. If the
+ * lookup service is down, what they typed is saved as is.
+ */
+async function chooseCity(user: User, text: string): Promise<string[]> {
+  const typed = cityFrom(text);
+  let found: City[];
+  try {
+    found = await findCities(typed);
+  } catch (err) {
+    console.error("city lookup failed; saving it as typed", err);
+    return setCity(user, typed);
+  }
+  if (found.length === 1) return setCity(user, found[0]!.label);
+  if (!found.length) {
+    return [
+      user.city
+        ? `I couldn't find a city called "${typed}", so yours is still ${user.city}. Adding the state helps, like "city Springfield, Illinois".`
+        : `I couldn't find a city called "${typed}". What city are you in? Adding the state helps, like "Springfield, Illinois".`,
+    ];
+  }
+  const options = found.map((c) => c.label);
+  await updateUser(user.id, { step: "city_pick", cityOptions: options });
+  return [["Which one?", ...options.map((o, i) => `${i + 1}. ${o}`), "Reply with the number, or type it again with the state."].join("\n")];
+}
+
+/** Saves their city; during onboarding, also finishes it. */
+async function setCity(user: User, city: string): Promise<string[]> {
+  const onboarding = !user.city;
+  await updateUser(user.id, { city, step: "done", cityOptions: null });
+  if (!onboarding) return [`Got it, your city is now ${city}.`];
+
+  const hour = user.fitCheckHour;
+  const done = [
+    `Got it, ${city}. You're all set.`,
+    hour === null ? "Daily fit checks are off." : `I'll ask for a fit check every day around ${formatHour(hour)}.`,
+  ].join(" ");
+  const first = firstRequests.get(user.id);
+  if (first === undefined) return [done, HELP];
+  firstRequests.delete(user.id);
+  return [done, ...(await handleText({ ...user, city, step: "done", cityOptions: null }, first))];
 }
 
 /** Handle a text message from a user, returning the replies to send. */
 export async function handleText(user: User, text: string): Promise<string[]> {
-  if (user.step === "city") {
-    const city = cityFrom(text);
-    await updateUser(user.id, { city, step: "done" });
-    const hour = user.fitCheckHour;
-    const done = [
-      `Got it, ${city}. You're all set.`,
-      hour === null ? "Daily fit checks are off." : `I'll ask for a fit check every day around ${formatHour(hour)}.`,
-    ].join(" ");
-    const first = firstRequests.get(user.id);
-    if (first === undefined) return [done, HELP];
-    firstRequests.delete(user.id);
-    return [done, ...(await handleText({ ...user, city, step: "done" }, first))];
+  if (user.step === "city") return chooseCity(user, text);
+  if (user.step === "city_pick") {
+    const pick = /^\s*#?(\d+)[.)]?\s*$/.exec(text);
+    const chosen = pick ? user.cityOptions?.[Number(pick[1]) - 1] : undefined;
+    if (chosen) return setCity(user, chosen);
+    if (!user.city) return chooseCity(user, text); // still onboarding: another try at the city
+    // Already set up and they moved on: drop the question, handle the text.
+    await updateUser(user.id, { step: "done", cityOptions: null });
+    user.step = "done";
+    user.cityOptions = null;
   }
 
   // Reminder numbers refer to the list as it stood when they texted, so
@@ -303,18 +334,14 @@ async function runAction(user: User, action: Action, listed: Reminder[]): Promis
     case "update_profile": {
       // "change my location" with no city: ask rather than guess.
       if (!action.name && !action.city) return ['Sure, what city are you in now? Text it like "city Detroit".'];
-      const changes: string[] = [];
+      const replies: string[] = [];
       if (action.name) {
         user.name = action.name;
-        changes.push(`I'll call you ${action.name}`);
+        await updateUser(user.id, { name: action.name });
+        replies.push(`Got it, I'll call you ${action.name}.`);
       }
-      if (action.city) {
-        user.city = action.city;
-        changes.push(`your city is now ${action.city}`);
-      }
-      await updateUser(user.id, { name: user.name, city: user.city });
-      const sentence = changes.join(" and ");
-      return [`Got it, ${sentence}.`];
+      if (action.city) replies.push(...(await chooseCity(user, action.city)));
+      return [replies.join("\n")];
     }
 
     case "help":
