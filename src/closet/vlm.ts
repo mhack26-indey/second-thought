@@ -72,6 +72,12 @@ async function imageDataUrl(image: ImageInput): Promise<string> {
   return `data:${mimeType};base64,${Buffer.from(await res.arrayBuffer()).toString("base64")}`;
 }
 
+/** Downloads a photo URL into an inline image, e.g. to check it loads before a call. */
+export async function loadImage(url: string): Promise<ImageInput> {
+  const match = (await imageDataUrl({ url })).match(/^data:([^;]+);base64,(.*)$/s);
+  return { base64: match![2]!, mediaType: match![1] as MediaType };
+}
+
 export class VlmError extends Error {}
 
 const MAX_RETRIES = 4;
@@ -111,13 +117,15 @@ export async function vlmJson<T extends z.ZodType>(opts: {
   images: ImageInput[];
   prompt: string;
   system?: string;
+  effort?: "low" | "medium" | "high";
+  model?: string;
 }): Promise<z.infer<T>> {
   const images = await Promise.all(opts.images.map(imageDataUrl));
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(opts.schema);
   const body = {
-    model: MODEL,
+    model: opts.model ?? MODEL,
     temperature: 0,
-    reasoning: { effort: "low" },
+    reasoning: { effort: opts.effort ?? "low" },
     response_format: {
       type: "json_schema",
       json_schema: { name: "answer", strict: true, schema: jsonSchema },

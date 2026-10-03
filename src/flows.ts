@@ -367,7 +367,7 @@ async function detectItems(
   }
   if (!seen.length) return ["I couldn't spot any clothes in that photo."];
 
-  const { worn, added } = await oneAtATime(userId, () => ingestFitCheck(userId, outfit, seen));
+  const { worn, added } = await oneAtATime(userId, () => ingestFitCheck(userId, outfit, seen, image));
   const lines: string[] = [];
   if (worn.length) lines.push(`Wearing: ${worn.map(itemName).join(", ")}.`);
   if (added.length) lines.push(`New to your closet: ${added.map(itemName).join(", ")}.`);

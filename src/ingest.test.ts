@@ -3,7 +3,7 @@ import type { ExtractedItem } from "./closet/extract.ts";
 import { activeItems, createOutfit, insertItem, wearCount } from "./closet/repo.ts";
 import type { Db } from "./db/client.ts";
 import { testDb } from "./db/test-db.ts";
-import { type Matcher, exactMatcher, ingestOutfit } from "./ingest.ts";
+import { type Matcher, exactMatcher, ingestOutfit, visionMatcher } from "./ingest.ts";
 
 const jeans: ExtractedItem = {
   category: "bottom",
@@ -93,4 +93,29 @@ test("the model's matches are used, and a failed call falls back to exact match"
     throw new Error("model down");
   });
   expect(fallback.added).toHaveLength(1); // exact match can't tell charcoal from black
+});
+
+const noPhotos = async (): Promise<never> => {
+  throw new Error("offline");
+};
+
+test("vision matcher links what the model calls near_identical", async () => {
+  const [owned] = (await fitCheck([jeans])).added;
+  const ask = async () => ({
+    items: [{ seen: 0, matches: [{ item_id: owned!.id, similarity: "near_identical" as const, reason: "same jeans" }] }],
+  });
+  // Worded differently this time; the model still sees the same jeans.
+  const drifted = { ...jeans, type: "pants", color_primary: "charcoal", description: "dark denim pants" };
+  const result = await fitCheck([drifted], visionMatcher({ url: "https://x/fit.jpg" }, exactMatcher, ask, noPhotos));
+  expect(result.worn.map((i) => i.id)).toEqual([owned!.id]);
+  expect(result.added).toEqual([]);
+});
+
+test("vision matcher falls back to name matching when the model fails", async () => {
+  const [owned] = (await fitCheck([jeans])).added;
+  const broken = async () => {
+    throw new Error("vision down");
+  };
+  const result = await fitCheck([jeans], visionMatcher({ url: "https://x/fit.jpg" }, exactMatcher, broken, noPhotos));
+  expect(result.worn.map((i) => i.id)).toEqual([owned!.id]);
 });

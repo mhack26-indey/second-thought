@@ -1,20 +1,42 @@
 import type { Db } from "./db/client.ts";
+import { type AskVision, compareToCloset, pickSameItems } from "./closet/compare.ts";
 import type { ExtractedItem } from "./closet/extract.ts";
 import { type Item, addWear, candidatesByCategory, insertItem } from "./closet/repo.ts";
+import type { ImageInput } from "./closet/vlm.ts";
 import { exactGroups, matchSeenItems, matchWithGroups } from "./match.ts";
 
 // Fit check ingest: every item seen in a photo either matches something the
 // user already owns (log a wear) or is new (add it to the closet).
 //
-// Matching (match.ts) has the local model group color and pattern names, since
-// the same item gets described with different words. If that call fails,
-// names compare as written, so an outage costs a few duplicates, not the photo.
+// With the photo at hand, the vision model judges each item against
+// same-category closet items (closet/compare.ts). Otherwise, or if that call
+// fails, matching (match.ts) has the local model group color and pattern
+// names, since the same item gets described with different words. If that
+// fails too, names compare as written, so an outage costs a few duplicates,
+// not the photo.
 
 const UNKNOWN = "unknown"; // fields a texted item didn't mention
 
 export type Matcher = (seen: ExtractedItem[], owned: Item[]) => Promise<(number | null)[]>;
 
 export const exactMatcher: Matcher = async (seen, owned) => matchWithGroups(seen, owned, exactGroups);
+
+/** Matches by looking at the photo; falls back to name matching if the call fails. */
+export function visionMatcher(
+  image: ImageInput,
+  fallback: Matcher = matchSeenItems,
+  ask?: AskVision,
+  load?: (url: string) => Promise<ImageInput>,
+): Matcher {
+  return async (seen, owned) => {
+    try {
+      return pickSameItems(await compareToCloset(image, seen, owned, ask, load));
+    } catch (err) {
+      console.error("vision matching failed; falling back to name matching", err);
+      return fallback(seen, owned);
+    }
+  };
+}
 
 export interface IngestResult {
   worn: Item[]; // already in the closet

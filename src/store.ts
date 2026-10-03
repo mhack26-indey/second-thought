@@ -11,7 +11,8 @@ import {
 } from "./closet/repo.ts";
 import { PUBLIC_URL } from "./config.ts";
 import { type Db, migrate } from "./db/client.ts";
-import { type IngestResult, ingestOutfit } from "./ingest.ts";
+import type { ImageInput } from "./closet/vlm.ts";
+import { type IngestResult, ingestOutfit, visionMatcher } from "./ingest.ts";
 
 // Everything lives in Neon Postgres. The closet tables (items, outfits, wears)
 // belong to the closet module (db/schema.sql, closet/repo.ts); the bot's own
@@ -187,8 +188,9 @@ export async function ingestFitCheck(
   userId: string,
   outfit: { id: number; photoUrl: string },
   seen: ExtractedItem[],
+  image?: ImageInput,
 ): Promise<IngestResult> {
-  return ingestOutfit(db, userId, outfit, seen);
+  return ingestOutfit(db, userId, outfit, seen, image ? visionMatcher(image) : undefined);
 }
 
 /** Newest first. */

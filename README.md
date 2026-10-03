@@ -48,9 +48,13 @@ iMessage ──► Spectrum (Photon) ──► src/index.ts ── message loop 
 - **Vision: Gemini through OpenRouter** (`src/closet/vlm.ts`, `src/closet/extract.ts`). A fit check photo becomes a list of items, each with type (from a fixed list of 42), category, colors, pattern, fit, season and a short description. Output is forced into a JSON schema and validated with zod. HEIC photos straight from an iPhone work.
 - **Text: a local `qwen2.5:7b`** through Ollama (`src/llm.ts`), or any OpenAI-compatible endpoint. It turns a free-form text into validated actions, using a prompt with few-shot examples. Exact commands like `my wardrobe` and `help` skip the model entirely. It also handles every naming judgment (below), so those don't use up the vision model's small free-tier quota.
 
-**Matching: is this the item they already own?** (`src/match.ts`, `src/ingest.ts`)
+**Matching: is this the item they already own?** (`src/closet/compare.ts`, `src/match.ts`, `src/ingest.ts`)
 
-The same jeans get described differently from photo to photo ("grey", then "charcoal"), and people text names that differ from what was logged. String equality creates duplicates, and asking a 7B model "is this the same item?" outright turned out unreliable: it paired a white graphic tee with a plain white tee even when told not to. So matching is split:
+For a fit check photo, the vision model decides. SQL pulls the closet items in the same categories as what's in the photo. One call then sends the new photo, up to 6 earlier photos those candidates came from, and the candidate list ("12: black ballet flats (flats, black, solid) [in photo B]"). The model rates each candidate `near_identical`, `similar` or `different`, with a short reason. Earlier photos are chosen by taking turns between items in the new photo, so a busy outfit can't crowd out one item's only match. Only `near_identical` logs a wear. Because the model looks at the actual garments, wording drift between extractions ("blouse" one day, "t-shirt" the next) doesn't create duplicates, and two black woven bags described the same way can still be told apart. Comparisons run at medium reasoning effort: at low effort, the model merged a flap bag with a tote every time.
+
+If the vision call fails, or for items added by text, matching falls back to names:
+
+The same jeans get described differently from photo to photo ("grey", then "charcoal"), and people text names that differ from what was logged. String equality creates duplicates, and asking a 7B model "is this the same item?" outright turned out unreliable: it paired a white graphic tee with a plain white tee even when told not to. So name matching is split:
 
 1. The local model sorts each color and pattern *name* into a fixed group (charcoal → gray, off-white → cream, gingham → plaid, logo → graphic). This is a single-word judgment, which a small model does reliably. Results are cached.
 2. Code compares: same type, same color group (or a neighboring shade such as cream/beige or blue/navy, because the vision model drifts between them), and same pattern group. "unknown" (a detail the user never mentioned) matches anything.
@@ -83,7 +87,8 @@ All in Neon Postgres. Tables are created on startup (or with `bun run migrate`).
 - **Text router:** 47 of 47 sample texts routed correctly (`bun run eval`), including chained requests. That's about 1.7s per text on an M-series Mac.
 - **Name grouping:** 9 of 9 tricky color and pattern names sorted correctly (charcoal, heather grey, dark blue, khaki, maroon, sage, pinstripe, gingham, logo). The matcher kept a graphic tee, a plain tee, navy jeans and black jeans apart while matching grey with charcoal.
 - **Extraction:** on a real outfit photo sent twice (once as HEIC, once as JPEG), Gemini found the same 6 items both times in about 2s. Two of them came back with drifted names (off-white → beige, plus a second color on the sunglasses), which is why neighboring shades now match.
-- **Tests:** 31 unit and database tests (`bun test`, using in-process Postgres via PGlite).
+- **Vision matching** (10 street-style test photos, 6 of the same person on different days, run end to end on a local database): resending a photo added no duplicates (5 of 5 items, then 8 of 8 on a 54-item closet). The same leather-panel top was recognized across two days although its descriptions differed, and different people's items never merged. A cropped "shopping photo" of camo pants matched the owned pants as `near_identical`, and matched nothing before they were in the closet. On 5 hard cases run 5 times each: 19 of 25 right. The misses: two woven black bags (a flap bag and a tote) merged in 4 of 5 runs, and a resent top in a crowded closet was missed in 2 of 5.
+- **Tests:** 41 unit and database tests (`bun test`, using in-process Postgres via PGlite).
 
 ## Setup
 
@@ -102,7 +107,8 @@ bun start
 | `PROJECT_ID`, `PROJECT_SECRET` | yes | Spectrum credentials from the [Photon dashboard](https://app.photon.codes) |
 | `DATABASE_URL` | yes | Neon Postgres connection string |
 | `OPENROUTER_API_KEY` | for photos | Without it, photos are saved but not read |
-| `VISION_MODEL` | no | Any OpenRouter vision model with structured outputs. Defaults to `google/gemini-3.8-flash` (about $0.004 per photo). |
+| `VISION_MODEL` | no | Any OpenRouter vision model with structured outputs. Defaults to `google/gemini-3.8-flash` (about $0.004 per extraction; a comparison with earlier photos costs a few cents). |
+| `COMPARE_MODEL` | no | Model for the matching comparison only. Defaults to `VISION_MODEL`. |
 | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | no | Text model; defaults to local Ollama with `qwen2.5:7b` |
 | `PORT`, `PUBLIC_URL` | no | Web server; links default to this machine's LAN address on port 3000, so phones on the same Wi-Fi can open them |
 | `BOT_NUMBER` | no | The number on the landing page's QR code |
@@ -131,7 +137,7 @@ src/
   web.ts            Landing page, wardrobe page, photo serving
   config.ts         Port and public URL
   schema.sql        Bot tables
-  closet/           Closet module: categories, Gemini extraction, repo
+  closet/           Closet module: categories, extraction, visual comparison, shopping match, repo
   db/               Closet schema, migration, test database
 scripts/            eval-router, extract-test-images, migrate
 ```
@@ -141,6 +147,6 @@ scripts/            eval-router, extract-test-images, migrate
 Against [`PLAN.md`](PLAN.md):
 
 - **Done:** closet intake from fit checks and texts (P0), season tags, "where did I put it?", "what should I buy?" (P1), plus reminders, daily fit checks, the wardrobe page and onboarding.
-- **Next (P0):** "Do I already have this?" for shopping photos (the matching code is already in place); order screenshot intake with return deadlines; return nudges ("you haven't worn this yet"); the impact counter.
+- **Next (P0):** "Do I already have this?" in the bot (`matchShoppingPhoto` in `src/closet/shopping.ts` returns the top 3 owned items with reasons and photos; it needs a way to tell a shopping photo from a fit check); order screenshot intake with return deadlines; return nudges ("you haven't worn this yet"); the impact counter.
 - **Later (P2):** season-aware closet ghosts and resale drafts, Nessie transaction detection, secondhand search links, a monthly recap card.
-- **Not yet:** CLIP embeddings with pgvector. Matching uses extracted attributes plus model-grouped names for now.
+- **Not yet:** CLIP embeddings with pgvector. SQL narrows by category and the vision model judges, which is enough for a closet of this size.
