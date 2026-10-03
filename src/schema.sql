@@ -4,7 +4,7 @@
 
 create table if not exists users (
   id             text primary key,                -- iMessage sender (phone number or email); items.user_id
-  step           text not null default 'city',    -- onboarding: 'city' | 'done'
+  step           text not null default 'city',    -- 'city' (onboarding) | 'city_pick' (choosing from a list) | 'done'
   name           text,
   city           text,                            -- for season-aware logic
   web_token      text not null unique,            -- random id in the wardrobe page URL
@@ -51,3 +51,7 @@ create table if not exists return_policies (
   return_days integer not null,
   notes       text
 );
+
+-- Places offered when a city name matched several ("Detroit, Michigan",
+-- "Detroit, Texas"...), as a JSON array, while step = 'city_pick'.
+alter table users add column if not exists city_options text;
