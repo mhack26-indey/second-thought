@@ -365,6 +365,26 @@ function resolveType(type: unknown, description: string): ItemType | undefined {
   return undefined;
 }
 
+/**
+ * "grey puma sweatpants" -> a closet item, for adding one by name on the
+ * wardrobe page. Type, color and pattern come from the words; a type word we
+ * don't know ("gilet") goes to the model to pick from the closet's types.
+ */
+export async function itemFromName(name: string): Promise<ExtractedItem | undefined> {
+  const pattern = name.toLowerCase().split(/[^a-z-]+/).find((w) => PATTERNS.has(w));
+  const raw = { description: name, color: colorIn(name), pattern };
+  const item = toItem(raw);
+  if (item) return item;
+  // "none" lets it decline a name that isn't clearly any type ("my comfy thing").
+  const { type } = await llmJson(
+    z.object({ type: z.enum(["none", ...ITEM_TYPES] as [string, ...string[]]) }),
+    `What kind of clothing item is "${name}"? Pick the closest of: ${ITEM_TYPES.join(", ")}.
+Examples: "olive gilet" -> vest, "chelsea boots" -> boots, "windbreaker" -> jacket, "trackies" -> sweatpants.
+Answer "none" only if the name doesn't say what kind of item it is, like "my comfy thing" or "that thing from zara".`,
+  );
+  return type === "none" ? undefined : toItem({ ...raw, type });
+}
+
 // A texted item fills the closet module's required fields with what the user
 // said; anything they didn't mention is "unknown" for matching to skip.
 function toItem(raw: any): ExtractedItem | undefined {
