@@ -73,12 +73,15 @@ function page({ user, items: allItems, outfits, reminders: pending, impact, wear
     fitsOf.set(item.id, [...(fitsOf.get(item.id) ?? []), outfit]);
     itemsOf.set(outfit.id, [...(itemsOf.get(outfit.id) ?? []), item]);
   }
+  // Photos per item for the viewer script: clicking an item enlarges just its photos.
+  const viewerPhotos: Record<number, { url: string; date: string; fit: number }[]> = {};
   const thumbs = (item: Item) => {
     const fits = (fitsOf.get(item.id) ?? []).filter((o) => o.photoUrl).sort((a, b) => a.at - b.at);
     if (!fits.length) return "";
-    return `<div class="thumbs">${fits
-      .map((o) => `<a href="#fit-${o.id}" title="${fmtDate(o.at)}"><img src="${esc(o.photoUrl!)}" loading="lazy" alt="Fit check ${fmtDate(o.at)}"></a>`)
-      .join("")}<small>worn ${fits.length}×</small></div>`;
+    viewerPhotos[item.id] = fits.map((o) => ({ url: o.photoUrl!, date: fmtDate(o.at), fit: o.id }));
+    return `<button type="button" class="thumbs" data-item="${item.id}" aria-label="Show ${plural(fits.length, "photo")} of ${esc(item.description)}">${fits
+      .map((o) => `<img src="${esc(o.photoUrl!)}" loading="lazy" alt="">`)
+      .join("")}<small>worn ${fits.length}×</small></button>`;
   };
 
   const sections = CATEGORIES.map((cat) => {
@@ -87,7 +90,7 @@ function page({ user, items: allItems, outfits, reminders: pending, impact, wear
     return `<section><h2>${SECTION_TITLES[cat]} <span>${items.length}</span></h2><ul>${items
       .map(
         (i) =>
-          `<li id="item-${i.id}"><div><span>${esc(i.description)}${i.location ? ` <small>· ${esc(i.location)}</small>` : ""}</span>${thumbs(i)}</div><time>${fmtDate(i.created_at.getTime())}</time></li>`,
+          `<li id="item-${i.id}"${fitsOf.has(i.id) ? ` class="has-photos" data-item="${i.id}"` : ""}><div><span>${esc(i.description)}${i.location ? ` <small>· ${esc(i.location)}</small>` : ""}</span>${thumbs(i)}</div><time>${fmtDate(i.created_at.getTime())}</time></li>`,
       )
       .join("")}</ul></section>`;
   }).join("");
@@ -134,7 +137,19 @@ function page({ user, items: allItems, outfits, reminders: pending, impact, wear
   figcaption { font-size: 12px; color: var(--muted); text-align: center; margin: 4px 0 2px; }
   .found li { display: block; padding: 3px 0; border: 0; font-size: 13px; line-height: 1.3; }
   .found a, .thumbs a { color: inherit; }
-  .thumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; }
+  .thumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+  li.has-photos { cursor: pointer; }
+  li.has-photos:hover > div > span { text-decoration: underline; text-underline-offset: 3px; }
+  dialog.viewer { width: 100%; max-width: 560px; height: 100%; max-height: 100%; margin: 0 auto; padding: 0; border: 0; background: Canvas; color: CanvasText; }
+  dialog.viewer::backdrop { background: #000a; }
+  .viewer header { position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; background: Canvas; border-bottom: 1px solid var(--line); z-index: 1; }
+  .viewer header h3 { margin: 0; font-size: 17px; }
+  .viewer header button { font-size: 20px; line-height: 1; padding: 6px 10px; background: transparent; color: inherit; border: 1px solid var(--line); }
+  .viewer .shots { display: grid; gap: 20px; padding: 16px; }
+  .viewer figure img { aspect-ratio: auto; max-height: 75vh; object-fit: contain; background: transparent; }
+  .viewer figcaption a { color: inherit; }
+  ::view-transition-group(*) { animation-duration: .35s; animation-timing-function: cubic-bezier(.2, .8, .2, 1); }
+  @media (prefers-reduced-motion: reduce) { ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; } }
   .thumbs img { width: 32px; height: 42px; aspect-ratio: auto; border-radius: 4px; display: block; }
   .thumbs small { color: var(--muted); font-size: 12px; margin-left: 4px; }
   li[id] { scroll-margin-top: 16px; }
@@ -171,6 +186,84 @@ ${photos ? `<div class="grid">${photos}</div>` : `<p class="empty">No fit checks
   <label>Daily fit check<select name="fitCheck">${hourOptions}</select></label>
   <button type="submit">Save</button>
 </form>
+<dialog class="viewer" aria-labelledby="viewer-title">
+  <header><h3 id="viewer-title"></h3><button type="button" class="close" aria-label="Close">✕</button></header>
+  <div class="shots"></div>
+</dialog>
+<script type="application/json" id="item-photos">${JSON.stringify(viewerPhotos).replace(/</g, "\\u003c")}</script>
+<script>
+(() => {
+  const photos = JSON.parse(document.getElementById("item-photos").textContent);
+  const dialog = document.querySelector("dialog.viewer");
+  const shots = dialog.querySelector(".shots");
+  const title = dialog.querySelector("h3");
+  const still = matchMedia("(prefers-reduced-motion: reduce)");
+  // Morph the clicked item's thumbnails into the big photos (and back) when
+  // the browser has view transitions; otherwise just open and close.
+  const transition = (update) =>
+    document.startViewTransition && !still.matches ? document.startViewTransition(update).finished : Promise.resolve(update());
+  let open = null; // the item's thumbnail images while the viewer is up
+
+  function name(imgs, on) {
+    imgs.forEach((img, i) => (img.style.viewTransitionName = on ? "shot-" + i : ""));
+  }
+
+  async function show(id) {
+    const list = photos[id];
+    const row = document.getElementById("item-" + id);
+    if (!list || !row) return;
+    const thumbs = [...row.querySelectorAll(".thumbs img")];
+    name(thumbs, true);
+    await transition(() => {
+      name(thumbs, false);
+      title.textContent = row.querySelector("span").firstChild.textContent.trim();
+      shots.replaceChildren(
+        ...list.map((p, i) => {
+          const fig = document.createElement("figure");
+          const img = document.createElement("img");
+          img.src = p.url;
+          img.alt = "Fit check " + p.date;
+          img.style.viewTransitionName = "shot-" + i;
+          const cap = document.createElement("figcaption");
+          const link = document.createElement("a");
+          link.href = "#fit-" + p.fit;
+          link.textContent = p.date + " · see the fit check";
+          cap.append(link);
+          fig.append(img, cap);
+          return fig;
+        }),
+      );
+      dialog.showModal();
+    });
+    open = thumbs;
+  }
+
+  async function hide() {
+    if (!dialog.open) return;
+    const big = [...shots.querySelectorAll("img")];
+    const thumbs = open ?? [];
+    open = null;
+    await transition(() => {
+      big.forEach((img) => (img.style.viewTransitionName = ""));
+      name(thumbs, true);
+      dialog.close();
+    });
+    name(thumbs, false);
+  }
+
+  document.addEventListener("click", (e) => {
+    const target = e.target.closest("[data-item]");
+    if (target && !e.target.closest("a")) {
+      e.preventDefault();
+      show(target.dataset.item);
+    }
+  });
+  dialog.querySelector(".close").addEventListener("click", hide);
+  dialog.addEventListener("click", (e) => e.target === dialog && hide()); // the backdrop
+  dialog.addEventListener("cancel", (e) => (e.preventDefault(), hide())); // Esc
+  shots.addEventListener("click", (e) => e.target.closest("a") && hide());
+})();
+</script>
 </body></html>`;
 }
 
