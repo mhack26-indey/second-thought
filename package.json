@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "bun src/index.ts",
-    "dev": "bun --watch src/index.ts"
+    "dev": "bun --watch src/index.ts",
+    "eval": "bun scripts/eval-router.ts"
   },
   "dependencies": {
     "spectrum-ts": "^12.10.1"
