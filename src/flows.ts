@@ -121,7 +121,7 @@ function fastPath(text: string): Action | undefined {
   if (/^(my )?reminders?( schedule)?$/.test(t)) return { action: "list_reminders" };
   if (/^(help|\?|commands)$/.test(t)) return { action: "help" };
   if (/^(thanks?( you)?|thx|ty)$/.test(t)) return { action: "chat", kind: "thanks" };
-  if (/^(hi|hey|hello|yo|sup)$/.test(t)) return { action: "chat", kind: "greeting" };
+  if (/^(hi+|hey+|hello|yo|sup|good (morning|afternoon|evening))$/.test(t)) return { action: "chat", kind: "greeting" };
   const cancel = /^cancel (?:reminder )?#?(\d+)$/.exec(t);
   if (cancel) return { action: "cancel_reminder", number: Number(cancel[1]) };
   if (/^(my )?(profile|info|settings)$/.test(t)) return { action: "show_profile" };
