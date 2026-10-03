@@ -1,18 +1,29 @@
 import { SQL } from "bun";
-import type { Category } from "./categories.ts";
+import type { ExtractedItem } from "./closet/extract.ts";
+import { type Item, activeItems, createOutfit, insertItem, setItemStatus } from "./closet/repo.ts";
+import { PUBLIC_URL } from "./config.ts";
+import { type Db, migrate } from "./db/client.ts";
 
-// Everything lives in Neon Postgres (schema in schema.sql). Each message reads
-// fresh rows, so other services (vision, matching) can write to the same tables.
+// Everything lives in Neon Postgres. The closet tables (items, outfits, wears)
+// belong to the closet module (db/schema.sql, closet/repo.ts); the bot's own
+// tables are in schema.sql. Each message reads fresh rows, so the vision and
+// matching code can write to the same tables.
 
 const url = process.env.DATABASE_URL;
-if (!url) throw new Error("DATABASE_URL is not set. Add your Neon connection string to .env.");
+if (!url) throw new Error("DATABASE_URL is not set. Run `vercel env pull` or add it to .env.");
 export const sql = new SQL(url);
 
+// One connection pool for both: the closet repo talks through this adapter.
+export const db: Db = {
+  query: async (text, params = []) => [...(await sql.unsafe(text, params as any[]))],
+};
+
+await migrate(db);
 await sql.unsafe(await Bun.file(new URL("./schema.sql", import.meta.url)).text());
 
 export type Step = "city" | "done";
 
-export { CATEGORIES, type Category } from "./categories.ts";
+export type { Item } from "./closet/repo.ts";
 
 export const DEFAULT_FIT_CHECK_HOUR = 9; // matches the column default in schema.sql
 
@@ -27,17 +38,10 @@ export interface User {
   lastFitPhoto: string | null; // local date of the last photo they sent
 }
 
-export interface Item {
-  id: string;
-  name: string;
-  category: Category;
-  addedAt: number;
-}
-
 export interface Outfit {
-  id: string;
-  mimeType: string;
-  at: number;
+  id: number;
+  photoUrl: string | null;
+  at: number; // when it was sent
 }
 
 export interface Reminder {
@@ -116,42 +120,50 @@ export async function releaseFitPing(id: string): Promise<void> {
   await sql`update users set last_fit_ping = null where id = ${id}`;
 }
 
-// ---- items ----
+// ---- items (closet module tables) ----
 
 export async function listItems(userId: string): Promise<Item[]> {
-  const rows = await sql`
-    select id, name, category, added_at from items
-    where user_id = ${userId} and status = 'owned' order by added_at`;
-  return rows.map((r: any) => ({ id: r.id, name: r.name, category: r.category, addedAt: r.added_at.getTime() }));
+  return activeItems(db, userId);
 }
 
-export async function addItems(userId: string, items: { name: string; category: Category }[]): Promise<void> {
-  if (!items.length) return;
-  await sql`insert into items ${sql(items.map((i) => ({ user_id: userId, name: i.name, category: i.category })))}`;
+/** Items described in a text, so there's no photo. */
+export async function addTextItems(userId: string, items: ExtractedItem[]): Promise<void> {
+  for (const item of items) await insertItem(db, { ...item, user_id: userId, source: "text" });
 }
 
-export async function removeItem(userId: string, itemId: string): Promise<void> {
-  await sql`delete from items where id = ${itemId} and user_id = ${userId}`;
+export async function removeItem(userId: string, itemId: number): Promise<void> {
+  await setItemStatus(db, userId, itemId, "removed");
 }
 
-// ---- outfits (fit check photos) ----
+// ---- photos and outfits ----
 
-export async function addOutfit(userId: string, image: Buffer, mimeType: string): Promise<void> {
-  await sql`insert into outfits (user_id, image, mime_type) values (${userId}, ${image}, ${mimeType})`;
+/** Public, unguessable URL for a stored photo; the vision model can fetch it. */
+export const photoUrl = (photoId: string) => `${PUBLIC_URL}/photos/${photoId}`;
+
+async function addPhoto(userId: string, image: Buffer, mimeType: string): Promise<string> {
+  const [row] = await sql`
+    insert into photos (user_id, image, mime_type) values (${userId}, ${image}, ${mimeType}) returning id`;
+  return row.id;
 }
 
-/** Newest first, without the image bytes. */
-export async function listOutfits(userId: string): Promise<Outfit[]> {
-  const rows = await sql`
-    select id, mime_type, worn_at from outfits where user_id = ${userId} order by worn_at desc`;
-  return rows.map((r: any) => ({ id: r.id, mimeType: r.mime_type, at: r.worn_at.getTime() }));
-}
-
-export async function getOutfitImage(userId: string, id: string): Promise<{ image: Uint8Array; mimeType: string } | undefined> {
+export async function getPhoto(id: string): Promise<{ image: Uint8Array; mimeType: string } | undefined> {
   // Reject non-UUIDs up front; Postgres would throw on the cast.
   if (!/^[0-9a-f-]{36}$/i.test(id)) return undefined;
-  const [row] = await sql`select image, mime_type from outfits where id = ${id} and user_id = ${userId}`;
+  const [row] = await sql`select image, mime_type from photos where id = ${id}`;
   return row && { image: row.image, mimeType: row.mime_type };
+}
+
+/** Saves a fit check photo as today's outfit. Item extraction hooks in here. */
+export async function addFitCheck(userId: string, image: Buffer, mimeType: string): Promise<void> {
+  const photoId = await addPhoto(userId, image, mimeType);
+  await createOutfit(db, { user_id: userId, taken_on: localDate(), photo_url: photoUrl(photoId) });
+}
+
+/** Newest first. */
+export async function listOutfits(userId: string): Promise<Outfit[]> {
+  const rows = await sql`
+    select id, photo_url, created_at from outfits where user_id = ${userId} order by created_at desc`;
+  return rows.map((r: any) => ({ id: r.id, photoUrl: r.photo_url, at: r.created_at.getTime() }));
 }
 
 // ---- reminders ----

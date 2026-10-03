@@ -4,7 +4,8 @@ import type { ExtractedItem } from "./extract.ts";
 
 // SQL for the closet tables. Match, dedup and ingest build on these.
 
-export type ItemSource = "fit_check" | "closet" | "order";
+// "text" = described in a text message ("just got black jeans"), so no photo.
+export type ItemSource = "fit_check" | "closet" | "order" | "text";
 export type ItemStatus = "active" | "returned" | "removed";
 
 export interface Item extends ExtractedItem {
@@ -70,6 +71,28 @@ export async function candidatesByCategory(
      ORDER BY id`,
     [userId, category],
   );
+}
+
+/** Everything the user currently owns, oldest first. */
+export async function activeItems(db: Db, userId: string): Promise<Item[]> {
+  return db.query<Item>(
+    `SELECT * FROM items WHERE user_id = $1 AND status = 'active' ORDER BY id`,
+    [userId],
+  );
+}
+
+/** Returns false if the item doesn't exist or belongs to someone else. */
+export async function setItemStatus(
+  db: Db,
+  userId: string,
+  itemId: number,
+  status: ItemStatus,
+): Promise<boolean> {
+  const rows = await db.query(
+    `UPDATE items SET status = $3 WHERE id = $1 AND user_id = $2 RETURNING id`,
+    [itemId, userId, status],
+  );
+  return rows.length > 0;
 }
 
 export async function createOutfit(

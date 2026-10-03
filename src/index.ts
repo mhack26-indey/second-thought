@@ -1,6 +1,7 @@
 import { Spectrum } from "spectrum-ts";
 import { imessage } from "@spectrum-ts/imessage";
 import { fitCheckPrompt, handlePhoto, handleText, startOnboarding } from "./flows.ts";
+import { warmUp } from "./llm.ts";
 import {
   claimDueReminders,
   claimFitPing,
@@ -78,6 +79,7 @@ async function tick() {
 }
 
 startWebServer();
+void warmUp(); // load the model now so the first text isn't slow
 const timer = setInterval(tick, 15_000);
 process.on("SIGINT", () => {
   clearInterval(timer);

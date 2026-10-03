@@ -2,9 +2,9 @@ import { type Action, type ChatKind, route } from "./llm.ts";
 import {
   type Reminder,
   type User,
-  addItems,
-  addOutfit,
+  addFitCheck,
   addReminder,
+  addTextItems,
   cancelReminder,
   listItems,
   listOutfits,
@@ -151,7 +151,7 @@ export async function handleText(user: User, text: string): Promise<string[]> {
       actions = await route(text, {
         now: new Date(),
         reminders: listed.map((r) => `${r.text} (${formatWhen(r.at)})`),
-        items: (await listItems(user.id)).map((i) => i.name),
+        items: (await listItems(user.id)).map((i) => i.description),
       });
     } catch (err) {
       console.error("LLM routing failed:", err instanceof Error ? err.message : err);
@@ -211,8 +211,8 @@ async function runAction(user: User, action: Action, listed: Reminder[]): Promis
     }
 
     case "add_items": {
-      await addItems(user.id, action.items);
-      return [`Added ${action.items.map((i) => i.name).join(", ")}.`];
+      await addTextItems(user.id, action.items);
+      return [`Added ${action.items.map((i) => i.description).join(", ")}.`];
     }
 
     case "remove_item": {
@@ -222,14 +222,14 @@ async function runAction(user: User, action: Action, listed: Reminder[]): Promis
       const words = needle.split(/[\s-]+/).filter(Boolean);
       const items = await listItems(user.id);
       const item =
-        items.find((i) => i.name.toLowerCase() === needle) ??
+        items.find((i) => i.description.toLowerCase() === needle) ??
         items.find((i) => {
-          const have = new Set(i.name.toLowerCase().split(/[\s-]+/));
+          const have = new Set(i.description.toLowerCase().split(/[\s-]+/));
           return words.every((w) => have.has(w));
         });
       if (!item) return [`I couldn't find "${action.name}" in your wardrobe.`];
       await removeItem(user.id, item.id);
-      return [`Removed ${item.name}.`];
+      return [`Removed ${item.description}.`];
     }
 
     case "show_profile": {
@@ -281,7 +281,7 @@ const CHAT_REPLIES: Record<ChatKind, string> = {
 
 export async function handlePhoto(user: User, image: Buffer, mimeType: string): Promise<string[]> {
   if (user.step !== "done") return [ASK_CITY];
-  await addOutfit(user.id, image, mimeType);
+  await addFitCheck(user.id, image, mimeType);
   await updateUser(user.id, { lastFitPhoto: localDate() }); // counts as today's fit check, so no ping
   return ["Saved your fit check. Auto-detecting the items in it is coming soon."];
 }

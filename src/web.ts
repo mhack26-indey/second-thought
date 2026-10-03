@@ -1,12 +1,12 @@
-import { networkInterfaces } from "node:os";
 import QRCode from "qrcode";
+import { CATEGORIES, type Category } from "./closet/categories.ts";
+import { PORT, PUBLIC_URL } from "./config.ts";
 import {
-  CATEGORIES,
   type Item,
   type Outfit,
   type Reminder,
   type User,
-  getOutfitImage,
+  getPhoto,
   getUserByToken,
   listItems,
   listOutfits,
@@ -17,19 +17,6 @@ import {
 // Wardrobe page, one per user at /w/<token>. The token is random so the URL
 // doesn't expose a phone number and can't be guessed. Whoever has the link can
 // view the closet and edit the profile, same as texting from that number.
-
-const PORT = Number(process.env.PORT ?? 3000);
-
-// Default to the LAN address so the link opens on a phone on the same Wi-Fi.
-// Set PUBLIC_URL to a tunnel or deployed URL to reach it from anywhere.
-function lanAddress(): string | undefined {
-  for (const nets of Object.values(networkInterfaces())) {
-    for (const net of nets ?? []) {
-      if (net.family === "IPv4" && !net.internal) return net.address;
-    }
-  }
-}
-const PUBLIC_URL = (process.env.PUBLIC_URL ?? `http://${lanAddress() ?? "localhost"}:${PORT}`).replace(/\/$/, "");
 
 export function wardrobeUrl(user: User): string {
   return `${PUBLIC_URL}/w/${user.webToken}`;
@@ -46,6 +33,16 @@ const fmtDate = (at: number) => new Date(at).toLocaleDateString("en-US", { month
 const fmtWhen = (at: number) =>
   new Date(at).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
+const SECTION_TITLES: Record<Category, string> = {
+  top: "tops",
+  bottom: "bottoms",
+  dress: "dresses",
+  outerwear: "outerwear",
+  shoes: "shoes",
+  accessory: "accessories",
+  jewelry: "jewelry",
+};
+
 interface PageData {
   user: User;
   items: Item[];
@@ -58,13 +55,14 @@ function page({ user, items: allItems, outfits, reminders: pending, saved }: Pag
   const sections = CATEGORIES.map((cat) => {
     const items = allItems.filter((i) => i.category === cat);
     if (!items.length) return "";
-    return `<section><h2>${cat} <span>${items.length}</span></h2><ul>${items
-      .map((i) => `<li>${esc(i.name)}<time>${fmtDate(i.addedAt)}</time></li>`)
+    return `<section><h2>${SECTION_TITLES[cat]} <span>${items.length}</span></h2><ul>${items
+      .map((i) => `<li>${esc(i.description)}<time>${fmtDate(i.created_at.getTime())}</time></li>`)
       .join("")}</ul></section>`;
   }).join("");
 
   const photos = outfits
-    .map((p) => `<figure><img src="/w/${user.webToken}/photos/${p.id}" loading="lazy" alt=""><figcaption>${fmtDate(p.at)}</figcaption></figure>`)
+    .filter((p) => p.photoUrl)
+    .map((p) => `<figure><img src="${esc(p.photoUrl!)}" loading="lazy" alt=""><figcaption>${fmtDate(p.at)}</figcaption></figure>`)
     .join("");
 
   const hour = user.fitCheckHour;
@@ -217,10 +215,10 @@ export function startWebServer() {
           return new Response(null, { status: 303, headers: { Location: `/w/${user.webToken}?saved#profile` } });
         },
       },
-      "/w/:token/photos/:id": async (req) => {
-        const user = await getUserByToken(req.params.token);
-        // Scoped to the token's user, so one link can't load another user's photos.
-        const photo = user && (await getOutfitImage(user.id, req.params.id));
+      // Photo ids are random UUIDs, so the URL itself is the access check. It
+      // has to be fetchable without a session so the vision model can load it.
+      "/photos/:id": async (req) => {
+        const photo = await getPhoto(req.params.id);
         if (!photo) return new Response("Not found", { status: 404 });
         return new Response(photo.image, {
           headers: { "Content-Type": photo.mimeType, "Cache-Control": "private, max-age=86400" },

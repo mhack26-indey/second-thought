@@ -1,10 +1,9 @@
--- Second Thought schema for Neon Postgres. Idempotent: runs on every startup.
--- Follows the data model in PLAN.md.
-
-create extension if not exists vector;
+-- Bot tables for Neon Postgres. Idempotent: runs on every startup, after the
+-- closet tables in db/schema.sql (items, outfits, wears), which the closet
+-- module owns. Follows the data model in PLAN.md.
 
 create table if not exists users (
-  id             text primary key,                -- iMessage sender (phone number or email)
+  id             text primary key,                -- iMessage sender (phone number or email); items.user_id
   step           text not null default 'city',    -- onboarding: 'city' | 'done'
   name           text,
   city           text,                            -- for season-aware logic
@@ -16,39 +15,15 @@ create table if not exists users (
   created_at     timestamptz not null default now()
 );
 
--- Fit check photos. Images live in the database so the bot has no local state.
-create table if not exists outfits (
-  id          uuid primary key default gen_random_uuid(),
-  user_id     text not null references users (id) on delete cascade,
-  image       bytea not null,
-  mime_type   text not null,
-  temperature real,                               -- °C when worn (season-aware ghosts, P2)
-  worn_at     timestamptz not null default now()
-);
-create index if not exists outfits_user on outfits (user_id, worn_at);
-
-create table if not exists items (
+-- Image bytes for photos users text in. outfits.photo_url (and later
+-- items.photo_url) point at /photos/<id> on our web server, so the bot needs
+-- no blob storage and the vision model can fetch images by URL.
+create table if not exists photos (
   id         uuid primary key default gen_random_uuid(),
   user_id    text not null references users (id) on delete cascade,
-  name       text not null,                       -- "black straight-leg jeans"
-  category   text not null,                       -- tops | bottoms | outerwear | shoes | dresses | accessories | other
-  color      text,
-  pattern    text,
-  season     text,
-  source     text not null default 'text',        -- text | fit_check | order | closet_photo
-  outfit_id  uuid references outfits (id) on delete set null, -- photo it was extracted from
-  embedding  vector,                              -- similarity search; dimension depends on the embedding model
-  location   text,                                -- "under-bed bin" (P1)
-  status     text not null default 'owned',       -- owned | returned | sold
-  added_at   timestamptz not null default now()
-);
-create index if not exists items_user on items (user_id, added_at);
-
--- Which items were worn together; powers the outfit-gap logic.
-create table if not exists wears (
-  item_id   uuid not null references items (id) on delete cascade,
-  outfit_id uuid not null references outfits (id) on delete cascade,
-  primary key (item_id, outfit_id)
+  image      bytea not null,
+  mime_type  text not null,
+  created_at timestamptz not null default now()
 );
 
 create table if not exists reminders (
@@ -60,9 +35,10 @@ create table if not exists reminders (
 );
 create index if not exists reminders_due on reminders (due_at) where not sent;
 
+-- items.purchase_id holds a purchases.id (as text) for items that came from an order.
 create table if not exists purchases (
   id              uuid primary key default gen_random_uuid(),
-  item_id         uuid not null references items (id) on delete cascade,
+  user_id         text not null references users (id) on delete cascade,
   retailer        text,
   price           numeric(10, 2),
   order_date      date,

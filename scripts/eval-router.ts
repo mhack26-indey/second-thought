@@ -22,8 +22,11 @@ const cases: [string, string, ((a: any) => boolean)?][] = [
   ["stop asking me for fit checks", "stop_fit_checks"],
   ["what's in my closet", "show_wardrobe"],
   ["send me the wardrobe link", "show_wardrobe"],
-  ["I bought a brown leather belt and olive cargo pants", "add_items", (a) => a.items.length === 2],
-  ["got a new rain jacket today", "add_items"],
+  ["I bought a brown leather belt and olive cargo pants", "add_items",
+    (a) => a.items.map((i: any) => i.type).join() === "belt,pants" && a.items[0].color_primary === "brown"],
+  ["got a new rain jacket today", "add_items", (a) => a.items[0].type === "jacket" && a.items[0].category === "outerwear"],
+  ["picked up a striped button down and some gold hoops", "add_items",
+    (a) => a.items.map((i: any) => i.type).join() === "button-up shirt,earrings" && a.items[0].pattern === "striped"],
   ["I gave away the gray crewneck", "remove_item", (a) => a.name === "gray crewneck"],
   ["get rid of the white sneakers from my list", "remove_item", (a) => a.name === "white sneakers"],
   ["sold my black jeans on depop", "remove_item", (a) => /black/.test(a.name) && /jeans/.test(a.name)],
@@ -44,7 +47,7 @@ const cases: [string, string, ((a: any) => boolean)?][] = [
 // Chained requests: the exact list of actions, in order, plus an optional check.
 const chained: [string, string[], ((a: any[]) => boolean)?][] = [
   ["add a navy blazer and remind me tomorrow at 10am to return the zara shirt", ["add_items", "add_reminder"],
-    (a) => a[0].items[0].name.includes("blazer") && new Date(a[1].at).getHours() === 10],
+    (a) => a[0].items[0].type === "blazer" && new Date(a[1].at).getHours() === 10],
   ["sold the white sneakers, also show me my closet", ["remove_item", "show_wardrobe"], (a) => a[0].name === "white sneakers"],
   ["cancel both my reminders", ["cancel_reminder", "cancel_reminder"], (a) => a[0].number === 1 && a[1].number === 2],
   ["I moved to Boston, change my fit check to 7am and show my reminders", ["update_profile", "set_fit_check_time", "list_reminders"],
@@ -54,6 +57,8 @@ const chained: [string, string[], ((a: any[]) => boolean)?][] = [
   ["remind me in 1 hour to try on the boots and in 2 hours to post the depop listing", ["add_reminder", "add_reminder"],
     (a) => Math.round((a[1].at - a[0].at) / 3600e3) === 1],
   ["what's my schedule and what do you know about me", ["list_reminders", "show_profile"]],
+  ["got black straight-leg jeans, a gray crewneck and gold hoops, remind me in 1 hour to return the zara shirt", ["add_items", "add_reminder"],
+    (a) => a[0].items.map((i: any) => i.type).join() === "jeans,crewneck,earrings"],
   ["stop fit checks", ["stop_fit_checks"]],
 ];
 

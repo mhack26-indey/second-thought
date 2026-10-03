@@ -1,13 +1,36 @@
-import { CATEGORIES, type Category } from "./categories.ts";
+import { ITEM_TYPES, type ItemType } from "./closet/categories.ts";
+import { type ExtractedItem, withCategory } from "./closet/extract.ts";
 
 // A small model turns free-form texts into one structured action. Any
 // OpenAI-compatible endpoint works; the default is a local Ollama server.
-//   Local (free):  ollama pull qwen2.5:3b
+//   Local (free):  ollama pull qwen2.5:7b
 //   Hosted (free tier): LLM_BASE_URL=https://api.groq.com/openai/v1
 //                       LLM_MODEL=llama-3.1-8b-instant LLM_API_KEY=...
 const BASE_URL = process.env.LLM_BASE_URL ?? "http://localhost:11434/v1";
-const MODEL = process.env.LLM_MODEL ?? "qwen2.5:3b";
+// 7B, not 3B: the 3B model passed the eval too, but it was fragile: small
+// prompt changes broke other cases, and some phrasings sent it into a
+// runaway generation. 7B is ~1.5s a text on an M-series Mac.
+const MODEL = process.env.LLM_MODEL ?? "qwen2.5:7b";
 const API_KEY = process.env.LLM_API_KEY;
+
+/**
+ * Loads the model and pins it in memory. Ollama unloads idle models after 5
+ * minutes, which made the first text after a quiet stretch take ~11s.
+ * No-op for hosted APIs.
+ */
+export async function warmUp(): Promise<void> {
+  if (!BASE_URL.includes(":11434")) return;
+  try {
+    const res = await fetch(`${BASE_URL.replace(/\/v1\/?$/, "")}/api/generate`, {
+      method: "POST",
+      body: JSON.stringify({ model: MODEL, keep_alive: -1 }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+  } catch (err) {
+    console.warn(`Couldn't load ${MODEL} in Ollama (is it running and pulled?):`, err instanceof Error ? err.message : err);
+  }
+}
 
 export type Action =
   | { action: "add_reminder"; at: number; text: string }
@@ -16,7 +39,7 @@ export type Action =
   | { action: "set_fit_check_time"; hour: number }
   | { action: "stop_fit_checks" }
   | { action: "show_wardrobe" }
-  | { action: "add_items"; items: { name: string; category: Category }[] }
+  | { action: "add_items"; items: ExtractedItem[] }
   | { action: "remove_item"; name: string }
   | { action: "show_profile" }
   | { action: "update_profile"; city?: string; name?: string }
@@ -39,15 +62,16 @@ Possible actions:
 {"action":"set_fit_check_time","hour":<0-23, 24-hour clock>}   (change the daily fit check reminder; "daily reminder" means this)
 {"action":"stop_fit_checks"}
 {"action":"show_wardrobe"}   (their closet / wardrobe / what they own)
-{"action":"add_items","items":[{"name":"<short description>","category":"<${CATEGORIES.join("|")}>"}]}
-{"action":"remove_item","name":"<item name exactly as in their items>"}
+{"action":"add_items","items":[{"type":"<kind of item>","color":"<if they said>","pattern":"<if they said>","fit":"<if they said>","description":"<the item in their words>"}]}
+{"action":"remove_item","name":"<item exactly as written in their items>"}
 {"action":"show_profile"}   (their info / profile / settings)
 {"action":"update_profile","city":"<new city, optional>","name":"<what to call them, optional>"}   (they moved, or tell you their name)
 {"action":"help"}   (they ask what the bot can do)
 {"action":"chat","kind":"greeting|thanks|style|other"}   (small talk; "style" = any question about how something looks or what to wear)
 
 Rules:
-- Use add_items only when they say they own, bought, or got clothes.
+- Use add_items only when they say they own, bought, or got clothes. Leave out color, pattern, or fit if they didn't say it. Include every item they mention, even ones already in their items (duplicates are handled later).
+- "type" is the kind of item in a word or two: jeans, hoodie, sneakers, blazer, earrings...
 - Do the reminder time math in fields, never by hand: "tonight at 9" is days_from_now 0, time "21:00".
 - Questions about how clothes look or what to wear are always chat with kind "style".
 - Never repeat an action or add one they didn't ask for.`;
@@ -57,15 +81,31 @@ const EX_CONTEXT = "Their reminders: 1. return the green jacket (Sat 1:00 PM); 2
 const SINGLE_EXAMPLES: [string, object][] = [
   ["remind me tomorrow at 6pm to return the green jacket", { action: "add_reminder", text: "return the green jacket", days_from_now: 1, time: "18:00" }],
   ["ping me in 2 hours about the boots", { action: "add_reminder", text: "the boots", in_minutes: 120 }],
+  ["remind me next week to sell the old sneakers", { action: "add_reminder", text: "sell the old sneakers", days_from_now: 7 }],
   ["remind me thursday at 3:30pm to ship the hoodie back", { action: "add_reminder", text: "ship the hoodie back", weekday: "thursday", time: "15:30" }],
   ["what's coming up", { action: "list_reminders" }],
   ["forget the zara one", { action: "cancel_reminder", number: 2 }],
+  ["nvm about the green jacket, delete that reminder", { action: "cancel_reminder", number: 1 }],
   ["make my daily fit check 8pm", { action: "set_fit_check_time", hour: 20 }],
   ["just got white sneakers and a navy hoodie", {
     action: "add_items",
     items: [
-      { name: "white sneakers", category: "shoes" },
-      { name: "navy hoodie", category: "tops" },
+      { type: "sneakers", color: "white", description: "white sneakers" },
+      { type: "hoodie", color: "navy", description: "navy hoodie" },
+    ],
+  }],
+  ["picked up a plaid flannel and a beanie", {
+    action: "add_items",
+    items: [
+      { type: "flannel", pattern: "plaid", description: "plaid flannel" },
+      { type: "beanie", description: "beanie" },
+    ],
+  }],
+  ["bought another gray crewneck and a red beanie", {
+    action: "add_items",
+    items: [
+      { type: "crewneck", color: "gray", description: "gray crewneck" },
+      { type: "beanie", color: "red", description: "red beanie" },
     ],
   }],
   ["donated the gray sweater", { action: "remove_item", name: "gray crewneck" }],
@@ -83,7 +123,7 @@ const SINGLE_EXAMPLES: [string, object][] = [
 
 const CHAINED_EXAMPLES: [string, object[]][] = [
   ["got a black puffer, remind me friday to return the green jacket", [
-    { action: "add_items", items: [{ name: "black puffer", category: "outerwear" }] },
+    { action: "add_items", items: [{ type: "puffer", color: "black", description: "black puffer" }] },
     { action: "add_reminder", text: "return the green jacket", weekday: "friday" },
   ]],
   ["cancel both reminders and stop the fit checks", [
@@ -122,7 +162,24 @@ export async function route(text: string, ctx: Context): Promise<Action[]> {
     body: JSON.stringify({
       model: MODEL,
       temperature: 0,
-      response_format: { type: "json_object" },
+      // Bounds a runaway generation (a constrained model can loop on whitespace)
+      // so it fails fast instead of hitting the timeout. Five actions fit easily.
+      max_tokens: 600,
+      // A schema (not just "json_object") makes Ollama constrain generation to
+      // one "actions" array; with plain JSON mode the 3B model sometimes wrote
+      // the "actions" key twice and the parse kept only the broken second one.
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "actions",
+          strict: false,
+          schema: {
+            type: "object",
+            properties: { actions: { type: "array", items: { type: "object" } } },
+            required: ["actions"],
+          },
+        },
+      },
       messages: [
         { role: "system", content: SYSTEM },
         ...EXAMPLES.flatMap(([user, actions]) => [
@@ -197,6 +254,82 @@ function reminderTime(raw: any, now: Date, num: (v: unknown) => number): number 
   return at.getTime();
 }
 
+// Common words people use that aren't in the closet module's type list.
+const TYPE_SYNONYMS: Record<string, ItemType> = {
+  tee: "t-shirt",
+  tshirt: "t-shirt",
+  shirt: "t-shirt",
+  sweatshirt: "crewneck",
+  trainers: "sneakers",
+  cargos: "pants",
+  chinos: "pants",
+  trousers: "pants",
+  joggers: "sweatpants",
+  cargo: "pants",
+  parka: "coat",
+  "button down": "button-up shirt",
+  "button-down": "button-up shirt",
+  flannel: "button-up shirt",
+  hoops: "earrings",
+  studs: "earrings",
+  beanie: "hat",
+  cap: "hat",
+  tote: "bag",
+  backpack: "bag",
+};
+
+const COLORS = new Set(
+  ("black white gray grey charcoal navy blue light-blue red burgundy maroon green olive sage teal " +
+    "brown tan beige cream ivory khaki camel pink purple lavender yellow mustard orange gold silver " +
+    "denim multicolor").split(" "),
+);
+const PATTERNS = new Set("solid striped graphic plaid floral camo colorblock checkered polka-dot houndstooth".split(" "));
+
+// Longest first, so "denim jacket" wins over "jacket" and "button down" over "down".
+const KNOWN_WORDS: [string, ItemType][] = [
+  ...ITEM_TYPES.map((t): [string, ItemType] => [t, t]),
+  ...(Object.entries(TYPE_SYNONYMS) as [string, ItemType][]),
+].sort((a, b) => b[0].length - a[0].length);
+
+/**
+ * Maps the model's free-form type ("button down", "beanie") to one of the
+ * closet module's types, checking their description first, then the type it gave.
+ * Picking from 45 types in the prompt made the small model worse at everything.
+ */
+function resolveType(type: unknown, description: string): ItemType | undefined {
+  // Their own words first: the model sometimes relabels ("gray crewneck" as hoodie).
+  for (const text of [description, String(type ?? "")]) {
+    const padded = ` ${text.toLowerCase().trim()} `;
+    const hit = KNOWN_WORDS.find(([word]) => padded.includes(` ${word} `) || padded.includes(` ${word}s `));
+    if (hit) return hit[1];
+  }
+  return undefined;
+}
+
+// A texted item fills the closet module's required fields with what the user
+// said; anything they didn't mention is "unknown" for matching to skip.
+function toItem(raw: any): ExtractedItem | undefined {
+  const field = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().toLowerCase() : undefined);
+  const description = field(raw?.description);
+  if (!description) return undefined;
+  const type = resolveType(raw?.type, description);
+  if (!type) return undefined;
+  const season = field(raw?.season);
+  // Small models put any adjective in "color" ("rain jacket" -> "rain"); keep
+  // real colors, and move a pattern word to pattern.
+  const color = field(raw?.color);
+  const pattern = field(raw?.pattern) ?? (color && PATTERNS.has(color) ? color : undefined);
+  return withCategory({
+    type,
+    color_primary: color && COLORS.has(color) ? color : "unknown",
+    color_secondary: null,
+    pattern: pattern ?? "unknown",
+    fit: field(raw?.fit) ?? "unknown",
+    season: season === "warm" || season === "cold" ? season : "all",
+    description,
+  });
+}
+
 // Small models drift from the schema, so check every field before acting.
 function validate(raw: any, now: Date): Action | undefined {
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : Number(v));
@@ -218,12 +351,7 @@ function validate(raw: any, now: Date): Action | undefined {
     }
     case "add_items": {
       if (!Array.isArray(raw.items)) return undefined;
-      const items = raw.items
-        .map((i: any) => ({
-          name: str(i?.name),
-          category: CATEGORIES.includes(i?.category) ? (i.category as Category) : "other",
-        }))
-        .filter((i: { name?: string }) => i.name) as { name: string; category: Category }[];
+      const items = raw.items.map(toItem).filter((i: ExtractedItem | undefined) => i) as ExtractedItem[];
       return items.length ? { action: "add_items", items } : undefined;
     }
     case "remove_item": {

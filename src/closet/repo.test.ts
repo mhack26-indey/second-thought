@@ -3,7 +3,15 @@ import { migrate, type Db } from "../db/client.ts";
 import { testDb } from "../db/test-db.ts";
 import { CATEGORIES } from "./categories.ts";
 import type { ExtractedItem } from "./extract.ts";
-import { addWear, candidatesByCategory, createOutfit, insertItem, wearCount } from "./repo.ts";
+import {
+  activeItems,
+  addWear,
+  candidatesByCategory,
+  createOutfit,
+  insertItem,
+  setItemStatus,
+  wearCount,
+} from "./repo.ts";
 
 const jeans: ExtractedItem = {
   category: "bottom",
@@ -62,6 +70,28 @@ test("candidatesByCategory scopes to user, category and active items", async () 
 
   const candidates = await candidatesByCategory(db, "u1", "bottom");
   expect(candidates.map((c) => c.id)).toEqual([mine.id]);
+});
+
+test("text items need no photo", async () => {
+  const item = await insertItem(db, { ...jeans, user_id: "u1", source: "text" });
+  expect(item.photo_url).toBeNull();
+  expect(item.source).toBe("text");
+});
+
+test("activeItems lists every category but skips removed items, scoped to the user", async () => {
+  const a = await insertItem(db, { ...jeans, user_id: "u1", source: "text" });
+  const b = await insertItem(db, { ...hoodie, user_id: "u1", source: "fit_check" });
+  const gone = await insertItem(db, { ...jeans, user_id: "u1", source: "text" });
+  await insertItem(db, { ...jeans, user_id: "u2", source: "text" });
+
+  expect(await setItemStatus(db, "u1", gone.id, "removed")).toBe(true);
+  expect((await activeItems(db, "u1")).map((i) => i.id)).toEqual([a.id, b.id]);
+});
+
+test("setItemStatus won't touch another user's item", async () => {
+  const theirs = await insertItem(db, { ...jeans, user_id: "u2", source: "text" });
+  expect(await setItemStatus(db, "u1", theirs.id, "removed")).toBe(false);
+  expect((await activeItems(db, "u2")).length).toBe(1);
 });
 
 test("wears link items to outfits and count per item", async () => {
