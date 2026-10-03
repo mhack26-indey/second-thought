@@ -13,6 +13,32 @@ const BASE_URL = process.env.LLM_BASE_URL ?? "http://localhost:11434/v1";
 // runaway generation. 7B is ~1.5s a text on an M-series Mac.
 const MODEL = process.env.LLM_MODEL ?? "qwen2.5:7b";
 const API_KEY = process.env.LLM_API_KEY;
+// OpenRouter only: which upstream providers may serve the model, e.g. "google-vertex".
+const PROVIDERS = (process.env.LLM_PROVIDERS ?? "").split(",").map((p) => p.trim()).filter(Boolean);
+const PROVIDER = PROVIDERS.length ? { provider: { only: PROVIDERS, require_parameters: true } } : {};
+
+// Rate limits and provider hiccups (429, 5xx) get two quick retries. Waits
+// stay short because someone is waiting on the reply to their text.
+const RETRY_WAITS_MS = [1_000, 2_000];
+
+async function postChat(body: object, timeoutMs: number): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {}),
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const wait = RETRY_WAITS_MS[attempt];
+    if (res.ok || wait === undefined || (res.status !== 429 && res.status < 500)) return res;
+    const retryAfter = Number(res.headers.get("retry-after"));
+    await res.body?.cancel();
+    await new Promise((resolve) => setTimeout(resolve, retryAfter > 0 && retryAfter <= 5 ? retryAfter * 1000 : wait));
+  }
+}
 
 /**
  * Loads the model and pins it in memory. Ollama unloads idle models after 5
@@ -167,14 +193,10 @@ export async function route(text: string, ctx: Context): Promise<Action[]> {
     `Their items: ${ctx.items.length ? ctx.items.join(", ") : "none"}`,
   ].join("\n");
 
-  const res = await fetch(`${BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {}),
-    },
-    body: JSON.stringify({
+  const res = await postChat(
+    {
       model: MODEL,
+      ...PROVIDER,
       temperature: 0,
       // Bounds a runaway generation (a constrained model can loop on whitespace)
       // so it fails fast instead of hitting the timeout. Five actions fit easily.
@@ -202,9 +224,9 @@ export async function route(text: string, ctx: Context): Promise<Action[]> {
         ]),
         { role: "user", content: `${context}\n\nMessage: ${text}` },
       ],
-    }),
-    signal: AbortSignal.timeout(20_000),
-  });
+    },
+    20_000,
+  );
   if (!res.ok) throw new Error(`LLM ${res.status}: ${await res.text()}`);
 
   const body = (await res.json()) as { choices: { message: { content: string } }[] };
@@ -422,23 +444,19 @@ export async function llmJson<T extends z.ZodType>(schema: T, prompt: string): P
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(schema);
   let problem = "";
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(`${BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {}),
-      },
-      body: JSON.stringify({
+    const res = await postChat(
+      {
         model: MODEL,
+        ...PROVIDER,
         temperature: 0,
         max_tokens: 800,
         response_format: { type: "json_schema", json_schema: { name: "answer", strict: true, schema: jsonSchema } },
         messages: [{ role: "user", content: prompt }],
-      }),
+      },
       // Runs in the background after a fit check, so it can take its time; a
       // first batch of new color names takes ~15s on an M-series Mac.
-      signal: AbortSignal.timeout(60_000),
-    });
+      60_000,
+    );
     if (!res.ok) throw new Error(`LLM ${res.status}: ${await res.text()}`);
     const body = (await res.json()) as { choices: { message: { content: string } }[] };
     try {

@@ -110,6 +110,7 @@ bun start
 | `VISION_MODEL` | no | Any OpenRouter vision model with structured outputs. Defaults to `google/gemini-3.8-flash` (about $0.004 per extraction; a comparison with earlier photos costs a few cents). |
 | `COMPARE_MODEL` | no | Model for the matching comparison only. Defaults to `VISION_MODEL`. |
 | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | no | Text model; defaults to local Ollama with `qwen2.5:7b` |
+| `LLM_PROVIDERS` | no | OpenRouter only: comma-separated providers allowed to serve the text model (e.g. `google-vertex`). Vision calls always use Google Vertex. |
 | `PORT`, `PUBLIC_URL` | no | Web server; links default to this machine's LAN address on port 3000, so phones on the same Wi-Fi can open them |
 | `BOT_NUMBER` | no | The number on the landing page's QR code |
 
