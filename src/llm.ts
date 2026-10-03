@@ -18,6 +18,8 @@ export type Action =
   | { action: "show_wardrobe" }
   | { action: "add_items"; items: { name: string; category: Category }[] }
   | { action: "remove_item"; name: string }
+  | { action: "show_profile" }
+  | { action: "update_profile"; city?: string; name?: string }
   | { action: "help" }
   | { action: "chat"; kind: ChatKind };
 
@@ -25,7 +27,9 @@ export const CHAT_KINDS = ["greeting", "thanks", "style", "other"] as const;
 export type ChatKind = (typeof CHAT_KINDS)[number];
 
 const SYSTEM = `You route text messages for Second Thought, an iMessage bot that remembers what clothes a user owns.
-Reply with exactly ONE JSON object and nothing else. Pick one of these actions:
+Reply with ONE JSON object and nothing else: {"actions":[...]}.
+Add one action per request in the message, in the order they asked. Most messages have exactly one.
+Possible actions:
 
 {"action":"add_reminder","text":"<what to remind them about, in their words>","in_minutes":<number>}   (for "in 20 min", "in 3 hours")
 {"action":"add_reminder","text":"<...>","days_from_now":<0 today, 1 tomorrow, 7 next week>,"time":"<HH:MM 24-hour, optional>"}   (for a day and/or clock time)
@@ -37,17 +41,20 @@ Reply with exactly ONE JSON object and nothing else. Pick one of these actions:
 {"action":"show_wardrobe"}   (their closet / wardrobe / what they own)
 {"action":"add_items","items":[{"name":"<short description>","category":"<${CATEGORIES.join("|")}>"}]}
 {"action":"remove_item","name":"<item name exactly as in their items>"}
+{"action":"show_profile"}   (their info / profile / settings)
+{"action":"update_profile","city":"<new city, optional>","name":"<what to call them, optional>"}   (they moved, or tell you their name)
 {"action":"help"}   (they ask what the bot can do)
 {"action":"chat","kind":"greeting|thanks|style|other"}   (small talk; "style" = any question about how something looks or what to wear)
 
 Rules:
 - Use add_items only when they say they own, bought, or got clothes.
 - Do the reminder time math in fields, never by hand: "tonight at 9" is days_from_now 0, time "21:00".
-- Questions about how clothes look or what to wear are always chat with kind "style".`;
+- Questions about how clothes look or what to wear are always chat with kind "style".
+- Never repeat an action or add one they didn't ask for.`;
 
 // Few-shot examples, formatted exactly like real requests.
 const EX_CONTEXT = "Their reminders: 1. return the green jacket (Sat 1:00 PM); 2. check the zara refund (Mon 9:00 AM)\nTheir items: black jeans, gray crewneck";
-const EXAMPLES: [string, object][] = [
+const SINGLE_EXAMPLES: [string, object][] = [
   ["remind me tomorrow at 6pm to return the green jacket", { action: "add_reminder", text: "return the green jacket", days_from_now: 1, time: "18:00" }],
   ["ping me in 2 hours about the boots", { action: "add_reminder", text: "the boots", in_minutes: 120 }],
   ["remind me thursday at 3:30pm to ship the hoodie back", { action: "add_reminder", text: "ship the hoodie back", weekday: "thursday", time: "15:30" }],
@@ -63,11 +70,32 @@ const EXAMPLES: [string, object][] = [
   }],
   ["donated the gray sweater", { action: "remove_item", name: "gray crewneck" }],
   ["show me my closet", { action: "show_wardrobe" }],
+  ["what info do you have on me", { action: "show_profile" }],
+  ["I just moved to Chicago", { action: "update_profile", city: "Chicago" }],
+  ["my name's Sam btw", { action: "update_profile", name: "Sam" }],
+  ["call me Jordan", { action: "update_profile", name: "Jordan" }],
   ["is this a good fit?", { action: "chat", kind: "style" }],
   ["what should I wear to the party", { action: "chat", kind: "style" }],
   ["good morning!", { action: "chat", kind: "greeting" }],
   ["appreciate it", { action: "chat", kind: "thanks" }],
   ["what's the weather like", { action: "chat", kind: "other" }],
+];
+
+const CHAINED_EXAMPLES: [string, object[]][] = [
+  ["got a black puffer, remind me friday to return the green jacket", [
+    { action: "add_items", items: [{ name: "black puffer", category: "outerwear" }] },
+    { action: "add_reminder", text: "return the green jacket", weekday: "friday" },
+  ]],
+  ["cancel both reminders and stop the fit checks", [
+    { action: "cancel_reminder", number: 1 },
+    { action: "cancel_reminder", number: 2 },
+    { action: "stop_fit_checks" },
+  ]],
+];
+
+const EXAMPLES: [string, object[]][] = [
+  ...SINGLE_EXAMPLES.map(([text, action]): [string, object[]] => [text, [action]]),
+  ...CHAINED_EXAMPLES,
 ];
 
 export interface Context {
@@ -76,7 +104,10 @@ export interface Context {
   items: string[];
 }
 
-export async function route(text: string, ctx: Context): Promise<Action | undefined> {
+// Cap so a confused model can't fire off a pile of actions from one text.
+const MAX_ACTIONS = 5;
+
+export async function route(text: string, ctx: Context): Promise<Action[]> {
   const context = [
     `Their reminders: ${ctx.reminders.length ? ctx.reminders.map((r, i) => `${i + 1}. ${r}`).join("; ") : "none"}`,
     `Their items: ${ctx.items.length ? ctx.items.join(", ") : "none"}`,
@@ -94,9 +125,9 @@ export async function route(text: string, ctx: Context): Promise<Action | undefi
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: SYSTEM },
-        ...EXAMPLES.flatMap(([user, action]) => [
+        ...EXAMPLES.flatMap(([user, actions]) => [
           { role: "user", content: `${EX_CONTEXT}\n\nMessage: ${user}` },
-          { role: "assistant", content: JSON.stringify(action) },
+          { role: "assistant", content: JSON.stringify({ actions }) },
         ]),
         { role: "user", content: `${context}\n\nMessage: ${text}` },
       ],
@@ -107,12 +138,26 @@ export async function route(text: string, ctx: Context): Promise<Action | undefi
 
   const body = (await res.json()) as { choices: { message: { content: string } }[] };
   const content = body.choices[0]?.message.content ?? "";
-  let action: Action | undefined;
+  let parsed: any;
   try {
-    action = validate(JSON.parse(content), ctx.now);
+    parsed = JSON.parse(content);
   } catch {}
-  if (!action) console.warn(`LLM gave an unusable answer for ${JSON.stringify(text)}: ${content}`);
-  return action;
+  // Accept a bare action too, in case the model forgets the wrapper.
+  const raws: unknown[] = Array.isArray(parsed?.actions) ? parsed.actions : parsed?.action ? [parsed] : [];
+
+  const actions: Action[] = [];
+  const seen = new Set<string>();
+  for (const raw of raws) {
+    const action = validate(raw, ctx.now);
+    const key = JSON.stringify(action);
+    if (!action || seen.has(key)) continue; // drop invalid and duplicate actions
+    seen.add(key);
+    actions.push(action);
+  }
+  if (actions.length < raws.length || !actions.length) {
+    console.warn(`LLM gave unusable actions for ${JSON.stringify(text)}: ${content}`);
+  }
+  return actions.slice(0, MAX_ACTIONS);
 }
 
 const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
@@ -139,6 +184,8 @@ function reminderTime(raw: any, now: Date, num: (v: unknown) => number): number 
     const [h, m] = [Number(time[1]), Number(time[2])];
     if (h > 23 || m > 59) return undefined;
     at.setHours(h, m, 0, 0);
+  } else if (days > 0 || weekday >= 0) {
+    at.setHours(9, 0, 0, 0); // "remind me friday" means Friday morning, not this exact minute
   }
   // Already passed: "friday" said on a Friday evening means next week,
   // "at 9" said at 10pm means tomorrow.
@@ -183,11 +230,18 @@ function validate(raw: any, now: Date): Action | undefined {
       const name = str(raw.name);
       return name ? { action: "remove_item", name } : undefined;
     }
+    case "update_profile": {
+      const city = str(raw.city);
+      const name = str(raw.name);
+      if (!city && !name) return undefined;
+      return { action: "update_profile", ...(city && { city }), ...(name && { name }) };
+    }
     case "chat":
       return { action: "chat", kind: CHAT_KINDS.includes(raw.kind) ? raw.kind : "other" };
     case "list_reminders":
     case "stop_fit_checks":
     case "show_wardrobe":
+    case "show_profile":
     case "help":
       return { action: raw.action };
     default:

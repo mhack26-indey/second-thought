@@ -6,7 +6,8 @@ const ctx = {
   reminders: ["return the green jacket (Sat Oct 4 1:00 PM)", "check zara refund (Mon Oct 6 9:00 AM)"],
   items: ["black straight-leg jeans", "gray crewneck", "white sneakers"],
 };
-// [text, expected action, optional check on the result]
+// [text, expected action, optional check on the result]. A single message
+// must produce exactly that one action.
 const cases: [string, string, ((a: any) => boolean)?][] = [
   ["remind me in 3 hours to try on the boots", "add_reminder", (a) => Math.abs(a.at - Date.now() - 3 * 3600e3) < 60e3],
   ["remind me tonight at 9 to pack the gym bag", "add_reminder", (a) => new Date(a.at).getHours() === 21],
@@ -27,6 +28,11 @@ const cases: [string, string, ((a: any) => boolean)?][] = [
   ["get rid of the white sneakers from my list", "remove_item", (a) => a.name === "white sneakers"],
   ["sold my black jeans on depop", "remove_item", (a) => /black/.test(a.name) && /jeans/.test(a.name)],
   ["what can you do", "help"],
+  ["what do you know about me", "show_profile"],
+  ["I moved to Seattle last week", "update_profile", (a) => a.city === "Seattle" && !a.name],
+  ["can you update my location to Ann Arbor", "update_profile", (a) => a.city === "Ann Arbor"],
+  ["call me Inesh", "update_profile", (a) => a.name === "Inesh" && !a.city],
+  ["call me tomorrow about the jacket return", "add_reminder"],
   ["thanks so much", "chat", (a) => a.kind === "thanks"],
   ["does this outfit look good", "chat", (a) => a.kind === "style"],
   ["what should I wear to a wedding", "chat", (a) => a.kind === "style"],
@@ -34,13 +40,42 @@ const cases: [string, string, ((a: any) => boolean)?][] = [
   ["good evening", "chat", (a) => a.kind === "greeting"],
   ["who won the game last night", "chat", (a) => a.kind === "other"],
 ];
+
+// Chained requests: the exact list of actions, in order, plus an optional check.
+const chained: [string, string[], ((a: any[]) => boolean)?][] = [
+  ["add a navy blazer and remind me tomorrow at 10am to return the zara shirt", ["add_items", "add_reminder"],
+    (a) => a[0].items[0].name.includes("blazer") && new Date(a[1].at).getHours() === 10],
+  ["sold the white sneakers, also show me my closet", ["remove_item", "show_wardrobe"], (a) => a[0].name === "white sneakers"],
+  ["cancel both my reminders", ["cancel_reminder", "cancel_reminder"], (a) => a[0].number === 1 && a[1].number === 2],
+  ["I moved to Boston, change my fit check to 7am and show my reminders", ["update_profile", "set_fit_check_time", "list_reminders"],
+    (a) => a[0].city === "Boston" && a[1].hour === 7],
+  ["got a gray beanie. thanks!", ["add_items"]], // dropping the "thanks" is fine too
+  ["got a gray beanie. thanks!", ["add_items", "chat"]],
+  ["remind me in 1 hour to try on the boots and in 2 hours to post the depop listing", ["add_reminder", "add_reminder"],
+    (a) => Math.round((a[1].at - a[0].at) / 3600e3) === 1],
+  ["what's my schedule and what do you know about me", ["list_reminders", "show_profile"]],
+  ["stop fit checks", ["stop_fit_checks"]],
+];
+
+const show = (a: any) => (a?.at ? { ...a, at: new Date(a.at).toLocaleString() } : a);
 let pass = 0;
 for (const [text, want, check] of cases) {
   const t0 = performance.now();
-  const a = await route(text, ctx).catch((e) => ({ action: `ERROR ${e.message}` }) as any);
-  const ok = a?.action === want && (!check || check(a));
+  const actions = await route(text, ctx).catch((e) => [{ action: `ERROR ${e.message}` }] as any[]);
+  const ok = actions.length === 1 && actions[0].action === want && (!check || check(actions[0]));
   if (ok) pass++;
-  const shown = a?.at ? { ...a, at: new Date(a.at).toLocaleString() } : a;
-  console.log(`${ok ? "✓" : "✗"} ${Math.round(performance.now() - t0)}ms  ${text}\n    ${JSON.stringify(shown)}`);
+  console.log(`${ok ? "✓" : "✗"} ${Math.round(performance.now() - t0)}ms  ${text}\n    ${JSON.stringify(actions.map(show))}`);
 }
-console.log(`${pass}/${cases.length}  (now: ${new Date().toLocaleString()})`);
+for (const [text, want, check] of chained) {
+  const t0 = performance.now();
+  const actions = await route(text, ctx).catch((e) => [{ action: `ERROR ${e.message}` }] as any[]);
+  const got = JSON.stringify(actions.map((a) => a.action));
+  // Same text listed twice means either expected list is fine; count it once.
+  const alts = chained.filter(([t]) => t === text);
+  if (alts[0]![1] !== want) continue;
+  const ok = alts.some(([, w, c]) => got === JSON.stringify(w) && (!c || c(actions)));
+  if (ok) pass++;
+  console.log(`${ok ? "✓" : "✗"} ${Math.round(performance.now() - t0)}ms  [chain] ${text}\n    ${JSON.stringify(actions.map(show))}`);
+}
+const total = cases.length + new Set(chained.map(([t]) => t)).size;
+console.log(`${pass}/${total}  (now: ${new Date().toLocaleString()})`);

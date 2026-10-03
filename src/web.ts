@@ -57,7 +57,7 @@ function page(user: User): string {
 
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Your wardrobe · Second Thought</title>
+<title>${user.name ? `${esc(user.name)}'s` : "Your"} wardrobe · Second Thought</title>
 <style>
   :root { color-scheme: light dark; --muted: #888; --line: #8883; }
   body { font: 16px/1.4 -apple-system, system-ui, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px 16px 48px; }
@@ -74,7 +74,7 @@ function page(user: User): string {
   figcaption { font-size: 12px; color: var(--muted); text-align: center; }
   .empty { color: var(--muted); }
 </style></head><body>
-<h1>Your wardrobe</h1>
+<h1>${user.name ? `${esc(user.name)}'s` : "Your"} wardrobe</h1>
 <p class="sub">${user.items.length} items · ${user.photos.length} fit checks${user.city ? ` · ${esc(user.city)}` : ""}</p>
 ${sections || `<p class="empty">No items yet. Text something like "I have black straight-leg jeans".</p>`}
 <h2>Fit checks</h2>

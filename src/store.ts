@@ -32,6 +32,7 @@ export interface Photo {
 export interface User {
   id: string; // platform user id (phone number / email on iMessage)
   step: Step;
+  name?: string;
   city?: string;
   createdAt: number;
   reminders: Reminder[];

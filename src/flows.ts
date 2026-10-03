@@ -1,6 +1,7 @@
 import { type Action, type ChatKind, route } from "./llm.ts";
 import {
   DEFAULT_FIT_CHECK_HOUR,
+  type Reminder,
   type User,
   localDate,
   pendingReminders,
@@ -59,6 +60,8 @@ function formatWhen(at: number): string {
   return `${day} ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
 }
 
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
 export const HELP = [
   "You can text me things like:",
   '• "my wardrobe" to see your closet',
@@ -66,6 +69,7 @@ export const HELP = [
   '• "remind me tomorrow to return the jacket"',
   '• "my reminders" to see your schedule',
   '• "fit check at 8am" or "stop fit checks"',
+  '• "my profile" to see your info, "city Detroit" or "call me Sam" to change it',
   "Or send a fit check photo.",
 ].join("\n");
 
@@ -93,6 +97,15 @@ function fastPath(text: string): Action | undefined {
   if (/^(hi|hey|hello|yo|sup)$/.test(t)) return { action: "chat", kind: "greeting" };
   const cancel = /^cancel (?:reminder )?#?(\d+)$/.exec(t);
   if (cancel) return { action: "cancel_reminder", number: Number(cancel[1]) };
+  if (/^(my )?(profile|info|settings)$/.test(t)) return { action: "show_profile" };
+  // Match the original text so the city or name keeps its capitalization.
+  const raw = text.trim().replace(/[.!]+$/, "");
+  const city = /^(?:(?:set|change|update) )?(?:my )?(?:city|location)(?: to| is)?:? (?!of\b)(.+)$/i.exec(raw);
+  if (city) return { action: "update_profile", city: city[1]!.trim() };
+  // "call me" only takes one capitalized word, so "call me tomorrow" stays a reminder.
+  const name = /^my name is (.+)$/i.exec(raw) ?? /^call me ([A-Z][\w'-]*)$/.exec(raw);
+  if (name && /^(tomorrow|later|tonight|back|soon)$/i.test(name[1]!)) return undefined;
+  if (name) return { action: "update_profile", name: name[1]!.trim() };
   return undefined;
 }
 
@@ -103,6 +116,7 @@ const EXACT_COMMANDS = [
   '• "my reminders" / "cancel 1"',
   '• "remind me in 2 hours to return the jacket"',
   '• "fit check at 8am" / "stop fit checks"',
+  '• "my profile" / "city Detroit" / "my name is Sam"',
 ].join("\n");
 
 /** Handle a text message from a user, returning the replies to send. */
@@ -118,12 +132,19 @@ export async function handleText(user: User, text: string): Promise<string[]> {
     ];
   }
 
-  let action = fastPath(text);
-  if (!action) {
+  // Reminder numbers refer to the list as it stood when they texted, so
+  // "cancel 1 and 2" still means the original 1 and 2 after the first cancel.
+  const listed = pendingReminders(user);
+
+  const exact = fastPath(text);
+  let actions: Action[];
+  if (exact) {
+    actions = [exact];
+  } else {
     try {
-      action = await route(text, {
+      actions = await route(text, {
         now: new Date(),
-        reminders: pendingReminders(user).map((r) => `${r.text} (${formatWhen(r.at)})`),
+        reminders: listed.map((r) => `${r.text} (${formatWhen(r.at)})`),
         items: user.items.map((i) => i.name),
       });
     } catch (err) {
@@ -131,12 +152,15 @@ export async function handleText(user: User, text: string): Promise<string[]> {
       return [EXACT_COMMANDS];
     }
   }
-  if (!action) return ["I didn't catch that.", HELP];
+  if (!actions.length) return ["I didn't catch that.", HELP];
 
-  return runAction(user, action);
+  const replies: string[] = [];
+  for (const action of actions) replies.push(...(await runAction(user, action, listed)));
+  // Several actions answer in one message instead of a burst of texts.
+  return actions.length > 1 ? [replies.join("\n")] : replies;
 }
 
-async function runAction(user: User, action: Action): Promise<string[]> {
+async function runAction(user: User, action: Action, listed: Reminder[]): Promise<string[]> {
   switch (action.action) {
     case "add_reminder": {
       user.reminders.push({ id: crypto.randomUUID(), at: action.at, text: action.text, sent: false });
@@ -158,7 +182,8 @@ async function runAction(user: User, action: Action): Promise<string[]> {
     }
 
     case "cancel_reminder": {
-      const target = pendingReminders(user)[action.number - 1];
+      const listedTarget = listed[action.number - 1];
+      const target = listedTarget && user.reminders.find((r) => r.id === listedTarget.id && !r.sent);
       if (!target) return ["I don't see that reminder. Text \"my reminders\" to see the list."];
       user.reminders = user.reminders.filter((r) => r.id !== target.id);
       await save();
@@ -205,6 +230,34 @@ async function runAction(user: User, action: Action): Promise<string[]> {
       user.items = user.items.filter((i) => i.id !== item.id);
       await save();
       return [`Removed ${item.name}.`];
+    }
+
+    case "show_profile": {
+      const hour = user.fitCheckHour === undefined ? DEFAULT_FIT_CHECK_HOUR : user.fitCheckHour;
+      return [
+        [
+          `Name: ${user.name ?? "not set"}`,
+          `City: ${user.city ?? "not set"}`,
+          `Daily fit check: ${hour === null ? "off" : formatHour(hour)}`,
+          `Wardrobe: ${plural(user.items.length, "item")}, ${plural(user.photos.length, "fit check")}`,
+          'Change it with "city Detroit", "call me Sam", or "fit check at 8am".',
+        ].join("\n"),
+      ];
+    }
+
+    case "update_profile": {
+      const changes: string[] = [];
+      if (action.name) {
+        user.name = action.name;
+        changes.push(`I'll call you ${action.name}`);
+      }
+      if (action.city) {
+        user.city = action.city;
+        changes.push(`your city is now ${action.city}`);
+      }
+      await save();
+      const sentence = changes.join(" and ");
+      return [`Got it, ${sentence}.`];
     }
 
     case "help":
