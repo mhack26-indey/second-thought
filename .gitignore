@@ -17,3 +17,4 @@ test_images/*
 # Demo photos (people's real photos; see demo_images/README.md)
 demo_images/*
 !demo_images/README.md
+!demo_images/labels.json
