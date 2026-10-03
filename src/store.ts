@@ -212,6 +212,13 @@ export async function addFitCheck(
   return { id: outfit.id, photoUrl: url };
 }
 
+// ---- fixing a fit check by hand (wardrobe page) ----
+
+export async function getOutfit(userId: string, outfitId: number): Promise<Outfit | undefined> {
+  const [r] = await sql`select id, photo_url, created_at from outfits where id = ${outfitId} and user_id = ${userId}`;
+  return r && { id: r.id, photoUrl: r.photo_url, at: r.created_at.getTime() };
+}
+
 /** Which items were worn in which fit check: one row per wear. */
 export async function listWears(userId: string): Promise<{ outfitId: number; itemId: number }[]> {
   const rows = await sql`

@@ -2,12 +2,17 @@ import QRCode from "qrcode";
 import { CATEGORIES, type Category } from "./closet/categories.ts";
 import { cityFrom, findCities } from "./cities.ts";
 import { PORT, PUBLIC_URL } from "./config.ts";
+import { addItemToOutfit, linkItem, mergeItems, unlinkItem } from "./fit-edits.ts";
+import { itemFromName } from "./llm.ts";
+import { exactGroups, llmGroups, mostAlike } from "./match.ts";
 import { type Impact, impactSummary } from "./impact.ts";
 import {
   type Item,
   type Outfit,
   type Reminder,
   type User,
+  db,
+  getOutfit,
   getPhoto,
   getUserByToken,
   impactFor,
@@ -46,6 +51,61 @@ const SECTION_TITLES: Record<Category, string> = {
   accessory: "accessories",
   jewelry: "jewelry",
 };
+
+const STYLE = `  :root { color-scheme: light dark; --muted: #888; --line: #8883; }
+  body { font: 16px/1.4 -apple-system, system-ui, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .impact { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 28px 0 8px; }
+  h2 span { font-weight: normal; }
+  ul { list-style: none; padding: 0; margin: 0; }
+  li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  li small { color: var(--muted); }
+  time { color: var(--muted); white-space: nowrap; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px 10px; }
+  figure { margin: 0; min-width: 0; scroll-margin-top: 16px; }
+  img { width: 100%; aspect-ratio: 3/4; object-fit: cover; border-radius: 8px; background: var(--line); }
+  figcaption { font-size: 12px; color: var(--muted); text-align: center; margin: 4px 0 2px; }
+  .found li { display: block; padding: 3px 0; border: 0; font-size: 13px; line-height: 1.3; }
+  .found a, .thumbs a { color: inherit; }
+  .thumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+  li.has-photos { cursor: pointer; }
+  li.has-photos:hover > div > span { text-decoration: underline; text-underline-offset: 3px; }
+  dialog.viewer { width: 100%; max-width: 560px; height: 100%; max-height: 100%; margin: 0 auto; padding: 0; border: 0; background: Canvas; color: CanvasText; }
+  dialog.viewer::backdrop { background: #000a; }
+  .viewer header { position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; background: Canvas; border-bottom: 1px solid var(--line); z-index: 1; }
+  .viewer header h3 { margin: 0; font-size: 17px; }
+  .viewer header button { font-size: 20px; line-height: 1; padding: 6px 10px; background: transparent; color: inherit; border: 1px solid var(--line); }
+  .viewer .shots { display: grid; gap: 20px; padding: 16px; }
+  .viewer figure img { aspect-ratio: auto; max-height: 75vh; object-fit: contain; background: transparent; }
+  .viewer figcaption a { color: inherit; }
+  ::view-transition-group(*) { animation-duration: .35s; animation-timing-function: cubic-bezier(.2, .8, .2, 1); }
+  @media (prefers-reduced-motion: reduce) { ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; } }
+  .thumbs img { width: 32px; height: 42px; aspect-ratio: auto; border-radius: 4px; display: block; }
+  .thumbs small { color: var(--muted); font-size: 12px; margin-left: 4px; }
+  li[id] { scroll-margin-top: 16px; }
+  :target { animation: flash 2s ease-out; }
+  @keyframes flash { from { background: #f5c54266; } to { background: transparent; } }
+  .empty { color: var(--muted); }
+  form { display: grid; gap: 12px; }
+  label { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
+  input, select, button { font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; }
+  button { background: CanvasText; color: Canvas; border: 0; font-weight: 600; cursor: pointer; }
+  .saved { color: #2a9d5c; font-size: 14px; margin: 0; }
+  .error { color: #d1495b; font-size: 14px; margin: 0; }
+  .edit { font-size: 12px; color: var(--muted); }
+  .fit img.photo { aspect-ratio: auto; max-height: 70vh; object-fit: contain; background: transparent; }
+  .fit li { align-items: center; flex-wrap: wrap; }
+  .fit form { display: flex; gap: 6px; align-items: center; margin: 0; }
+  .fit li > form select { max-width: 190px; padding: 6px 8px; font-size: 14px; }
+  .fit li > div { display: flex; gap: 6px; flex-wrap: wrap; }
+  .fit button.quiet { background: transparent; color: inherit; border: 1px solid var(--line); font-weight: normal; padding: 6px 10px; font-size: 14px; }
+  .fit .add { display: grid; gap: 8px; }
+  .fit .add div { display: flex; gap: 6px; flex-wrap: wrap; }
+  .notice { padding: 10px 12px; border-radius: 8px; background: #2a9d5c22; margin: 0 0 16px; }
+  .back { color: inherit; display: inline-block; margin-bottom: 12px; }
+`;
 
 interface PageData {
   user: User;
@@ -102,7 +162,7 @@ function page({ user, items: allItems, outfits, reminders: pending, impact, wear
       const list = found.length
         ? `<ul class="found">${found.map((i) => `<li><a href="#item-${i.id}">${esc(i.description)}</a></li>`).join("")}</ul>`
         : "";
-      return `<figure id="fit-${p.id}"><img src="${esc(p.photoUrl!)}" loading="lazy" alt="Fit check ${fmtDate(p.at)}"><figcaption>${fmtDate(p.at)}</figcaption>${list}</figure>`;
+      return `<figure id="fit-${p.id}"><img src="${esc(p.photoUrl!)}" loading="lazy" alt="Fit check ${fmtDate(p.at)}"><figcaption>${fmtDate(p.at)} · <a class="edit" href="/w/${user.webToken}/fit/${p.id}">Edit</a></figcaption>${list}</figure>`;
     })
     .join("");
 
@@ -120,49 +180,7 @@ function page({ user, items: allItems, outfits, reminders: pending, impact, wear
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${user.name ? `${esc(user.name)}'s` : "Your"} wardrobe · Second Thought</title>
 <style>
-  :root { color-scheme: light dark; --muted: #888; --line: #8883; }
-  body { font: 16px/1.4 -apple-system, system-ui, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px 16px 48px; }
-  h1 { font-size: 28px; margin: 0 0 4px; }
-  .sub { color: var(--muted); margin: 0 0 24px; }
-  .impact { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 28px 0 8px; }
-  h2 span { font-weight: normal; }
-  ul { list-style: none; padding: 0; margin: 0; }
-  li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
-  li small { color: var(--muted); }
-  time { color: var(--muted); white-space: nowrap; font-size: 14px; }
-  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px 10px; }
-  figure { margin: 0; min-width: 0; scroll-margin-top: 16px; }
-  img { width: 100%; aspect-ratio: 3/4; object-fit: cover; border-radius: 8px; background: var(--line); }
-  figcaption { font-size: 12px; color: var(--muted); text-align: center; margin: 4px 0 2px; }
-  .found li { display: block; padding: 3px 0; border: 0; font-size: 13px; line-height: 1.3; }
-  .found a, .thumbs a { color: inherit; }
-  .thumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
-  li.has-photos { cursor: pointer; }
-  li.has-photos:hover > div > span { text-decoration: underline; text-underline-offset: 3px; }
-  dialog.viewer { width: 100%; max-width: 560px; height: 100%; max-height: 100%; margin: 0 auto; padding: 0; border: 0; background: Canvas; color: CanvasText; }
-  dialog.viewer::backdrop { background: #000a; }
-  .viewer header { position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; background: Canvas; border-bottom: 1px solid var(--line); z-index: 1; }
-  .viewer header h3 { margin: 0; font-size: 17px; }
-  .viewer header button { font-size: 20px; line-height: 1; padding: 6px 10px; background: transparent; color: inherit; border: 1px solid var(--line); }
-  .viewer .shots { display: grid; gap: 20px; padding: 16px; }
-  .viewer figure img { aspect-ratio: auto; max-height: 75vh; object-fit: contain; background: transparent; }
-  .viewer figcaption a { color: inherit; }
-  ::view-transition-group(*) { animation-duration: .35s; animation-timing-function: cubic-bezier(.2, .8, .2, 1); }
-  @media (prefers-reduced-motion: reduce) { ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; } }
-  .thumbs img { width: 32px; height: 42px; aspect-ratio: auto; border-radius: 4px; display: block; }
-  .thumbs small { color: var(--muted); font-size: 12px; margin-left: 4px; }
-  li[id] { scroll-margin-top: 16px; }
-  :target { animation: flash 2s ease-out; }
-  @keyframes flash { from { background: #f5c54266; } to { background: transparent; } }
-  .empty { color: var(--muted); }
-  form { display: grid; gap: 12px; }
-  label { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
-  input, select, button { font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; }
-  button { background: CanvasText; color: Canvas; border: 0; font-weight: 600; cursor: pointer; }
-  .saved { color: #2a9d5c; font-size: 14px; margin: 0; }
-  .error { color: #d1495b; font-size: 14px; margin: 0; }
-</style></head><body>
+${STYLE}</style></head><body>
 <h1>${user.name ? `${esc(user.name)}'s` : "Your"} wardrobe</h1>
 <p class="impact">${impactSummary(impact)}</p>
 <p class="sub">${plural(allItems.length, "item")} · ${plural(outfits.length, "fit check")}${user.city ? ` · ${esc(user.city)}` : ""}</p>
@@ -266,6 +284,60 @@ ${photos ? `<div class="grid">${photos}</div>` : `<p class="empty">No fit checks
 </script>
 </body></html>`;
 }
+
+interface FitPageData {
+  user: User;
+  outfit: Outfit;
+  linked: Item[];
+  sameAs: Map<number, Item[]>; // per linked item: closet items it might really be
+  closet: Item[]; // everything else they own, to link by hand
+  notice?: string;
+}
+
+/**
+ * One fit check, to fix what the vision model got wrong: merge a split item
+ * into the one it really is, unlink what isn't there, link or add what's missing.
+ */
+function fitPage({ user, outfit, linked, sameAs, closet, notice }: FitPageData): string {
+  const base = `/w/${user.webToken}`;
+  const action = `${base}/fit/${outfit.id}`;
+  const rows = linked
+    .map((i) => {
+      const options = sameAs.get(i.id) ?? [];
+      const merge = options.length
+        ? `<form method="post" action="${action}"><input type="hidden" name="op" value="merge"><input type="hidden" name="item" value="${i.id}">
+            <select name="into" aria-label="Same as">${options.map((o) => `<option value="${o.id}">${esc(o.description)}</option>`).join("")}</select>
+            <button class="quiet">Same as this</button></form>`
+        : "";
+      return `<li id="item-${i.id}"><span>${esc(i.description)}</span><div>${merge}
+        <form method="post" action="${action}"><input type="hidden" name="op" value="unlink"><input type="hidden" name="item" value="${i.id}"><button class="quiet">Not in this photo</button></form></div></li>`;
+    })
+    .join("");
+  const owned = closet
+    .map((i) => `<option value="${i.id}">${esc(i.description)} (${esc(i.category)})</option>`)
+    .join("");
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fit check ${fmtDate(outfit.at)} · Second Thought</title>
+<style>
+${STYLE}</style></head><body class="fit">
+<a class="back" href="${base}#fit-${outfit.id}">← Wardrobe</a>
+<h1>Fit check, ${fmtDate(outfit.at)}</h1>
+${notice ? `<p class="notice">${esc(notice)}</p>` : ""}
+${outfit.photoUrl ? `<img class="photo" src="${esc(outfit.photoUrl)}" alt="Fit check ${fmtDate(outfit.at)}">` : ""}
+<h2>In this photo <span>${linked.length}</span></h2>
+${rows ? `<ul>${rows}</ul>` : `<p class="empty">No items linked to this photo.</p>`}
+<h2>Add something that's missing</h2>
+<form class="add" method="post" action="${action}">
+  <input type="hidden" name="op" value="add">
+  <label>Something you already own${owned ? `<select name="existing"><option value="">Pick an item…</option>${owned}</select>` : ` <small>(nothing else in your closet)</small>`}</label>
+  <label>Or a new item<input name="name" maxlength="${MAX_FIELD}" placeholder="e.g. grey puma sweatpants"></label>
+  <div><button>Add to this photo</button></div>
+</form>
+</body></html>`;
+}
+
+const html = (body: string) => new Response(body, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 
 // The number people text to start. Defaults to our Spectrum line; override
 // with BOT_NUMBER if the line changes (`photon spectrum lines list`).
@@ -383,6 +455,65 @@ export function startWebServer() {
           await updateUser(user.id, patch);
           // Post/redirect/get so a refresh doesn't resubmit the form.
           return new Response(null, { status: 303, headers: { Location: redirect } });
+        },
+      },
+      "/w/:token/fit/:id": {
+        GET: async (req) => {
+          const user = await getUserByToken(req.params.token);
+          const outfit = user && (await getOutfit(user.id, Number(req.params.id)));
+          if (!user || !outfit) return new Response("Not found", { status: 404 });
+          const [items, wears] = await Promise.all([listItems(user.id), listWears(user.id)]);
+          const linkedIds = new Set(wears.filter((w) => w.outfitId === outfit.id).map((w) => w.itemId));
+          const linked = items.filter((i) => linkedIds.has(i.id));
+          const groups = await llmGroups(items).catch(() => exactGroups);
+          const sameAs = new Map(linked.map((i) => [i.id, mostAlike(i, items, groups)]));
+          const closet = items.filter((i) => !linkedIds.has(i.id));
+          const notice = new URL(req.url).searchParams.get("msg") ?? undefined;
+          return html(fitPage({ user, outfit, linked, sameAs, closet, notice }));
+        },
+        POST: async (req) => {
+          const user = await getUserByToken(req.params.token);
+          const outfit = user && (await getOutfit(user.id, Number(req.params.id)));
+          if (!user || !outfit) return new Response("Not found", { status: 404 });
+          const form = await req.formData();
+          const field = (key: string) => String(form.get(key) ?? "").trim().slice(0, MAX_FIELD);
+          const itemId = Number(field("item"));
+          const items = await listItems(user.id);
+          const nameOf = (id: number) => items.find((i) => i.id === id)?.description ?? "that item";
+
+          let msg = "";
+          switch (field("op")) {
+            case "unlink": {
+              const { removed } = await unlinkItem(db, user.id, outfit.id, itemId);
+              msg = removed
+                ? `Removed ${nameOf(itemId)}: it was only ever seen in this photo.`
+                : `${nameOf(itemId)} is no longer linked to this photo.`;
+              break;
+            }
+            case "merge": {
+              const into = Number(field("into"));
+              msg = (await mergeItems(db, user.id, itemId, into))
+                ? `Merged: ${nameOf(itemId)} is now ${nameOf(into)}.`
+                : "Couldn't merge those two.";
+              break;
+            }
+            case "add": {
+              const existing = Number(field("existing"));
+              const name = field("name");
+              if (existing) {
+                msg = (await linkItem(db, user.id, outfit.id, existing)) ? `Linked ${nameOf(existing)}.` : "Couldn't link that item.";
+              } else if (name) {
+                const item = await itemFromName(name).catch(() => undefined);
+                if (item) {
+                  const saved = await addItemToOutfit(db, user.id, outfit, item);
+                  msg = `Added ${saved.description} (${saved.type}) to your closet and this photo.`;
+                } else msg = `I couldn't tell what kind of item "${name}" is. Try naming the type, like "grey sweatpants".`;
+              } else msg = "Pick an item or type a name.";
+              break;
+            }
+          }
+          const back = `/w/${user.webToken}/fit/${outfit.id}${msg ? `?msg=${encodeURIComponent(msg)}` : ""}`;
+          return new Response(null, { status: 303, headers: { Location: back } });
         },
       },
       // Photo ids are random UUIDs, so the URL itself is the access check. It

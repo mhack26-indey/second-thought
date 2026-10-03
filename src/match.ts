@@ -109,6 +109,35 @@ export function sameItem(owned: Item, seen: ExtractedItem, g: Groups): boolean {
   return owned.type === seen.type && (agrees(a, b) || near(a, b)) && agrees(g.pattern(owned.pattern), g.pattern(seen.pattern));
 }
 
+const descWords = (s: string) => s.toLowerCase().match(/[a-z]+/g) ?? [];
+
+/**
+ * How alike two closet items look on paper: same type, same (or neighboring)
+ * color group, same pattern group, shared description words. For suggesting
+ * "same as..." merges when the vision model split one item in two.
+ */
+export function likeness(a: ExtractedItem, b: ExtractedItem, g: Groups): number {
+  let score = a.type === b.type ? 3 : 0;
+  const [ca, cb] = [g.color(a.color_primary)!, g.color(b.color_primary)!];
+  score += ca === cb ? 2 : agrees(ca, cb) || near(ca, cb) ? 1 : 0;
+  if (agrees(g.pattern(a.pattern), g.pattern(b.pattern))) score += 1;
+  const wa = new Set(descWords(a.description));
+  const wb = new Set(descWords(b.description));
+  const shared = [...wa].filter((w) => wb.has(w)).length;
+  return score + (2 * shared) / Math.max(wa.size, wb.size, 1);
+}
+
+/** The items most like `target` in its category, best first. */
+export function mostAlike(target: Item, pool: Item[], g: Groups, n = 4): Item[] {
+  return pool
+    .filter((i) => i.id !== target.id && i.category === target.category)
+    .map((i) => ({ i, score: likeness(target, i, g) }))
+    .filter((x) => x.score >= 2)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, n)
+    .map((x) => x.i);
+}
+
 /**
  * For each seen item, the id of the owned item it is, or null if it's new.
  * Each owned item matches at most once (two black tees in one photo are two
