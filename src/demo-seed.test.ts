@@ -1,74 +1,132 @@
 import { beforeEach, expect, test } from "bun:test";
 import { addDays, formatDay, today as localToday } from "./closet/dates.ts";
-import { activeItems, insertItem, recentWears } from "./closet/repo.ts";
+import type { ExtractedItem, PhotoExtraction } from "./closet/extract.ts";
+import { activeItems, insertItem } from "./closet/repo.ts";
+import type { ImageInput } from "./closet/vlm.ts";
 import type { Db } from "./db/client.ts";
 import { testDb } from "./db/test-db.ts";
-import { DEMO_OUTFITS, seedDemo } from "./demo-seed.ts";
-import { WINDOW_DAYS, worthBuying } from "./gaps.ts";
+import { type DemoOptions, photoDate, scheduleDemoPhotos, seedDemo } from "./demo-seed.ts";
 import { impactTotals } from "./impact.ts";
-import { exactGroups } from "./match.ts";
+import { exactMatcher } from "./ingest.ts";
 import { claimNudges } from "./returns.ts";
 
 const DEMO = "+15555550100";
-const today = localToday(); // recentWears counts back from the database's current_date
+const today = localToday();
+
+const piece = (category: ExtractedItem["category"], type: ExtractedItem["type"], color: string, description: string): ExtractedItem => ({
+  category,
+  type,
+  color_primary: color,
+  color_secondary: null,
+  pattern: "solid",
+  fit: "regular",
+  season: "all",
+  description,
+});
+const puffer = piece("outerwear", "puffer", "red", "red quilted puffer jacket");
+const grayTee = piece("top", "t-shirt", "gray", "light gray t-shirt");
+const polo = piece("top", "polo", "navy", "navy short-sleeve polo");
+const joggers = piece("bottom", "sweatpants", "black", "black cargo joggers");
+const chinos = piece("bottom", "pants", "beige", "khaki chinos");
+
+// What the stubbed vision model sees in each photo.
+const PHOTOS: Record<string, PhotoExtraction> = {
+  "PXL_20250117_1.jpg": { kind: "fit_check", items: [puffer, grayTee] },
+  "IMG-20260801-WA1.jpg": { kind: "fit_check", items: [polo, joggers] },
+  "Screenshot_1.png": { kind: "fit_check", items: [puffer] },
+  "PXL_20260727_a.jpg": { kind: "fit_check", items: [polo, chinos] },
+  "PXL_20260727_b.jpg": { kind: "fit_check", items: [polo, chinos] },
+  "P1.jpg": { kind: "product", items: [polo] }, // the model calls it a product shot
+};
 
 let db: Db;
 beforeEach(async () => {
   db = await testDb();
 });
 
-const savePhoto = async (name: string) => (name === "fit-12" ? null : `https://example.test/photos/${name}`);
-const seed = () => seedDemo(db, { userId: DEMO, today, savePhoto });
-const count = async (table: string) =>
-  (await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM ${table} WHERE user_id = $1`, [DEMO]))[0]!.n;
+const options = (): DemoOptions => ({
+  userId: DEMO,
+  today,
+  files: Object.keys(PHOTOS),
+  savePhoto: async (file) => ({ url: `https://example.test/photos/${file}`, image: { url: `demo:${file}` } }),
+  extract: async (image: ImageInput) => PHOTOS[(image as { url: string }).url.slice("demo:".length)]!,
+  matcher: () => exactMatcher, // stands in for the vision comparison
+});
 
-test("every demo beat has something to find", async () => {
-  const result = await seed();
-  expect(result).toMatchObject({ outfits: 12, items: 13, missingPhotos: ["fit-12"] });
+test("photos are read and deduped like live fit checks", async () => {
+  const result = await seedDemo(db, options());
 
-  // "what should I buy?" names tops
-  const answer = worthBuying(await recentWears(db, DEMO, WINDOW_DAYS), exactGroups);
-  expect(answer).toBe("You wear 5 bottoms with the same 2 tops. A gray top would go with all of them: 15 new outfits.");
+  expect(result.closet.map((r) => [r.description, r.wears])).toEqual([
+    ["navy short-sleeve polo", 4],
+    ["red quilted puffer jacket", 2],
+    ["khaki chinos", 2],
+    ["light gray t-shirt", 1],
+    ["black cargo joggers", 1],
+    ["green cropped utility jacket", 0],
+  ]);
+  expect(result.closet[1]!.photos).toEqual(["PXL_20250117_1.jpg", "Screenshot_1.png"]);
+  expect(result.misread).toEqual([{ file: "P1.jpg", kind: "product" }]); // still ingested as a fit check
 
-  // black jeans worn often, with a photo for the vision model to compare against
+  // Items date from the first photo they're in.
   const items = await activeItems(db, DEMO);
-  const jeans = items.find((i) => i.description === "black straight-leg jeans")!;
-  const [wears] = await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM wears WHERE item_id = $1`, [jeans.id]);
-  expect(wears!.n).toBe(6);
-  expect(jeans.photo_url).toBe("https://example.test/photos/fit-01");
+  const first = scheduleDemoPhotos(Object.keys(PHOTOS), today)[0]!;
+  expect(first.file).toBe("PXL_20250117_1.jpg");
+  expect(localToday(items.find((i) => i.description === puffer.description)!.created_at)).toBe(first.takenOn);
 
-  // only "check returns" reaches the jacket: its window closes in 5 days
+  // The storage location and the earlier skipped purchase sit on real items.
+  expect(result.stored).toBe("red quilted puffer jacket");
+  expect(items.find((i) => i.location)).toMatchObject({ description: "red quilted puffer jacket", location: "under-bed bin" });
+  expect(result.skipped).toBe("navy short-sleeve polo");
+  expect(await impactTotals(db, DEMO)).toEqual({ skipped: 1, recovered: 0 });
+
+  // Only "check returns" reaches the jacket: its window closes in 5 days.
   expect(await claimNudges(db, { today, userId: DEMO })).toEqual([]);
   const [nudge] = await claimNudges(db, { today, userId: DEMO, anyDeadline: true });
   expect(nudge!.text).toBe(
     `You haven't worn the green cropped utility jacket from Zara in any fit checks yet. Return window closes ${formatDay(addDays(today, 5))}. Keeping it? Reply keep or return.`,
   );
-
-  expect(items.find((i) => i.location)).toMatchObject({ description: "camel wool coat", location: "under-bed bin" });
-  expect(await impactTotals(db, DEMO)).toEqual({ skipped: 1, recovered: 0 });
 });
 
 test("rerunning resets the demo user and leaves everyone else alone", async () => {
   await db.query(`INSERT INTO users (id, web_token) VALUES ('someone-else', 'token-else')`);
-  await insertItem(db, { ...{ category: "top", type: "hoodie", color_primary: "red", color_secondary: null, pattern: "solid", fit: "regular", season: "all", description: "red hoodie" }, user_id: "someone-else", source: "text" });
+  await insertItem(db, { ...grayTee, user_id: "someone-else", source: "text" });
 
-  const first = await seed();
-  // Rehearsal leftovers: a nudge answered, a reminder, an extra shopping check.
+  const first = await seedDemo(db, options());
   await claimNudges(db, { today, userId: DEMO, anyDeadline: true });
   await db.query(`UPDATE purchases SET status = 'returning' WHERE user_id = $1`, [DEMO]);
   await db.query(`INSERT INTO reminders (user_id, text, due_at) VALUES ($1, 'x', now())`, [DEMO]);
 
-  const second = await seed();
+  const second = await seedDemo(db, options());
   expect(second.webToken).toBe(first.webToken); // the wardrobe link survives reruns
-  expect(await count("outfits")).toBe(DEMO_OUTFITS.length);
-  expect(await count("items")).toBe(13);
+  expect(second.closet).toEqual(first.closet);
+  const count = async (table: string) =>
+    (await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM ${table} WHERE user_id = $1`, [DEMO]))[0]!.n;
+  expect(await count("outfits")).toBe(6);
   expect(await count("reminders")).toBe(0);
   expect(await count("impact_events")).toBe(1);
-  const [purchase] = await db.query<{ status: string; nudged_at: Date | null }>(
-    `SELECT status, nudged_at FROM purchases WHERE user_id = $1`,
-    [DEMO],
-  );
+  const [purchase] = await db.query<{ status: string; nudged_at: Date | null }>(`SELECT status, nudged_at FROM purchases WHERE user_id = $1`, [DEMO]);
   expect(purchase).toEqual({ status: "kept", nudged_at: null });
+  expect((await activeItems(db, "someone-else")).map((i) => i.description)).toEqual(["light gray t-shirt"]);
+});
 
-  expect((await activeItems(db, "someone-else")).map((i) => i.description)).toEqual(["red hoodie"]);
+test("photo dates come from Pixel and WhatsApp names, not screenshots", () => {
+  expect(photoDate("PXL_20260727_222520790.RAW-01.jpg")).toBe("2026-07-27");
+  expect(photoDate("IMG-20251214-WA00122.jpg")).toBe("2025-12-14");
+  expect(photoDate("Screenshot_20261003-183523.png")).toBeNull();
+  expect(photoDate("P7143138.jpg")).toBeNull();
+});
+
+test("dates are remapped into the last 21 days, in order, with undated photos spread out", () => {
+  const schedule = scheduleDemoPhotos(
+    ["IMG-20260801-WA1.jpg", "u2.jpg", "PXL_20250117_1.jpg", "PXL_20260727_b.jpg", "u1.jpg", "PXL_20260727_a.jpg"],
+    "2026-10-03",
+  );
+  expect(schedule.map((p) => [p.takenOn, p.file])).toEqual([
+    ["2026-09-12", "PXL_20250117_1.jpg"],
+    ["2026-09-17", "u1.jpg"],
+    ["2026-09-22", "PXL_20260727_a.jpg"], // same day as its pair
+    ["2026-09-22", "PXL_20260727_b.jpg"],
+    ["2026-09-27", "u2.jpg"],
+    ["2026-10-02", "IMG-20260801-WA1.jpg"],
+  ]);
 });

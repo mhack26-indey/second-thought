@@ -91,13 +91,35 @@ All in Neon Postgres. Tables are created on startup (or with `bun run migrate`).
 | `return_policies` | bot | return days and returns page for 15 retailers, seeded on startup |
 | `impact_events` | bot | purchases skipped (a shopping check found a match) and money back (a return), for "my impact" |
 
-## Accuracy so far
+## Accuracy
+
+### Real photos (`bun run eval:closet`)
+
+15 real outfit photos of one person, ingested in order through the live fit check path (extraction, then vision dedup against the closet so far) and scored against hand labels in `demo_images/labels.json` (31 items, 50 appearances; 16 items appear in 2+ photos, 6 of them with confident labels). Run Oct 3, 2026 on `google/gemini-3.8-flash`; full output in [`eval/closet-results.md`](eval/closet-results.md).
+
+| Metric | Result |
+|---|---|
+| Unique items created vs true unique labels | 36 vs 31 |
+| Missed merges (one item split into several) | 0 of 6 confidently repeated items |
+| Wrong merges (different items merged) | 0 |
+| Extraction: labeled items found, right category | 50/50 (100%) |
+| Extraction: right category and color | 44/50 (88%) |
+| Shopping match ("do I have this?" on a held-out photo): right item first | 6/6 |
+| Shopping match: right item in top 3 | 6/6 |
+
+What the numbers hide:
+
+- **Color is the weak spot.** All 6 extraction misses are color names, and all 6 are muted colors in bad light: sage read as grey (twice), olive as khaki under purple light, navy shorts as black in a dark photo, black joggers as charcoal, and white sneakers as black under colored light. Dedup doesn't suffer (the comparison looks at the photos, not the names), but the closet's descriptions and "what should I buy?" color suggestions do.
+- **Uncertain repeats stay separate.** 4 of the 5 extra items are repeats the labels mark as unsure (black joggers with the cargo pocket hidden, a pinned blazer that may belong to a suit, two pairs of black dress shoes, shorts in purple light). The model kept them apart, which is the cheaper mistake: a duplicate in the closet rather than two items merged. The fifth is a bag the labels missed.
+- **The sample is small.** Only 6 items repeat with confident labels, and 4 of the 6 shopping checks come from two photos taken the same afternoon. One run; answers vary between runs.
+
+### Earlier checks
 
 - **Text router:** 48 of 49 sample texts routed correctly with Llama 3.1 8B (`bun run eval`), including chained requests, at about 0.3s per text; 15 of 16 on phrasings it hadn't seen. Local qwen2.5:7b scored 49 of 49 but took about 1.1s, and 14s for name grouping (comparison in `src/llm.ts`).
 - **Name grouping:** 9 of 9 tricky color and pattern names sorted correctly (charcoal, heather grey, dark blue, khaki, maroon, sage, pinstripe, gingham, logo). The matcher kept a graphic tee, a plain tee, navy jeans and black jeans apart while matching grey with charcoal.
 - **Extraction:** on a real outfit photo sent twice (once as HEIC, once as JPEG), Gemini found the same 6 items both times in about 2s. Two of them came back with drifted names (off-white → beige, plus a second color on the sunglasses), which is why neighboring shades now match.
 - **Vision matching** (10 street-style test photos, 6 of the same person on different days, run end to end on a local database): resending a photo added no duplicates (5 of 5 items, then 8 of 8 on a 54-item closet). The same leather-panel top was recognized across two days although its descriptions differed, and different people's items never merged. A cropped "shopping photo" of camo pants matched the owned pants as `near_identical`, and matched nothing before they were in the closet. On 5 hard cases run 5 times each: 19 of 25 right. The misses: two woven black bags (a flap bag and a tote) merged in 4 of 5 runs, and a resent top in a crowded closet was missed in 2 of 5.
-- **Tests:** 81 unit and database tests (`bun test`, using in-process Postgres via PGlite).
+- **Tests:** 83 unit and database tests (`bun test`, using in-process Postgres via PGlite).
 
 ## Setup
 
@@ -131,11 +153,19 @@ bun start
 | `bun run eval` | Router accuracy against the configured text model |
 | `bun run extract` | Run extraction on the photos in `test_images/` (not checked in; see `test_images/ATTRIBUTION.md`) |
 | `bun run migrate` | Create or update tables on `DATABASE_URL` |
-| `bun run seed:demo` | Reset the demo user to three weeks of seeded data (below) |
+| `bun run seed:demo` | Reset the demo user to a closet built from the real photos in `demo_images/` (below) |
+| `bun run eval:closet` | Closet accuracy on the real photos against `demo_images/labels.json` (about 18 minutes; writes `eval/closet-results.md`) |
 
 ### Demo data
 
-`bun run seed:demo` gives one phone a lived-in closet without any vision calls: 12 dated fit checks over three weeks (photos from `demo_images/`, listed in its README), black straight-leg jeans worn in 6 of them, an unworn green jacket from a Zara order 25 days ago, a winter coat stored in the under-bed bin, and one earlier skipped purchase. It wipes and recreates only that user's data (items, fit checks, photos, purchases, reminders, impact events), so run it before every rehearsal. The wardrobe page link stays the same across reruns.
+`bun run seed:demo` builds one phone's closet from real outfit photos in `demo_images/` (not checked in; see its README). Each photo goes through the same extraction and dedup as a live fit check, oldest first, so the closet, wear counts and repeat items are what the bot would really have made. Fit check dates come from the filenames (Pixel `PXL_2026…` and WhatsApp `IMG-2025…-WA…`), squeezed into the last 21 days in order; photos without a date are spaced evenly between them. On top of that it adds an unworn green jacket from a Zara order 25 days ago, puts the red puffer (or another jacket, if there's no puffer) in the under-bed bin, and records one earlier skipped purchase on the most-worn item. At the end it prints the closet: each item, its category, wear count and the photos it appeared in.
+
+It wipes and recreates only that user's data (items, fit checks, photos, purchases, reminders, impact events), so run it before every rehearsal. The wardrobe page link stays the same across reruns. It makes real vision calls: one extraction and one comparison per photo, about 15–20 seconds each, so 15 photos take around 5 minutes.
+
+```sh
+bun run seed:demo --dry-run                     # which photos, on which days; no database, no model
+DEMO_PHONE=+15551234567 bun run seed:demo --skip P7143138.jpg,IMG-20260114-WA0005.jpg   # leave photos out
+```
 
 Run it, and the bot, against a Neon branch so the demo never touches real users' data:
 
@@ -149,7 +179,7 @@ bun start                                       # same shell, so the bot uses th
 
 `DEMO_NAME` and `DEMO_CITY` are optional (Sam, Ann Arbor). Photo links are saved with the current `PUBLIC_URL`, so seed with the same `PUBLIC_URL` the bot runs with. The script prints the wardrobe page link.
 
-Then, from the demo phone: send a photo of black jeans and "do I have this?"; "what should I buy?" (names a top); "where's my winter coat?"; "check returns", then "return"; "my impact". An order screenshot needs a real screenshot.
+Then, from the demo phone: "do I have this?" and a new photo of a repeat item (the navy polo, say); "what should I buy?"; "where's my red puffer?"; "check returns", then "return"; "my impact". Check the printed closet first: these answers depend on what the model made of the photos. An order screenshot needs a real screenshot.
 
 "check returns" skips orders placed in the last 7 days, since a new order hasn't had a chance to show up in a fit check. So a screenshot of something you just ordered won't be nudged on the spot; "check returns" nudges the seeded Zara jacket (ordered 25 days ago) instead. To show screenshot → nudge with your own screenshot, use one whose order date is at least a week old. The bot reads the date from the screenshot, and uses today only when none is visible.
 
@@ -168,15 +198,16 @@ src/
   orders.ts         Order intake: return policies, purchases, closet items, reply
   returns.ts        Return nudges, keep/return/"returned it", "check returns"
   impact.ts         Impact counter: skipped purchases and money back, "my impact"
-  demo-seed.ts      Demo user data for scripts/seed-demo.ts
+  demo-seed.ts      Demo closet from real photos, via the live fit check path
   store.ts          Database access for the bot
   web.ts            Landing page, wardrobe page, photo serving
   config.ts         Port and public URL
   schema.sql        Bot tables
   closet/           Closet module: categories, extraction, visual comparison, shopping match, repo
   db/               Closet schema, migration, test database
-scripts/            eval-router, extract-test-images, migrate, seed-demo
-demo_images/        Photos for the seeded demo fit checks (not checked in; see its README)
+scripts/            eval-router, eval-closet, extract-test-images, migrate, seed-demo
+demo_images/        Real outfit photos (not checked in) and their labels; see its README
+eval/               Eval results
 ```
 
 ## Roadmap

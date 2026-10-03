@@ -1,6 +1,6 @@
 # Roadmap status
 
-Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 2026, after the demo seed script.
+Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 2026, after the real-photo seed and closet eval.
 
 **Legend:** ✅ done · 🟡 partly done · ⬜ not started · ✂️ dropped by a plan change
 
@@ -52,6 +52,7 @@ These weren't features in the plan, but the flows need them:
 - Wardrobe page (`/w/<token>`): items with locations, fit check photos, reminders, an editable profile. This is the plan's "one closet page".
 - Landing page with a QR code that texts the bot
 - Typing bubble while the bot works
+- Closet accuracy eval on 15 real photos (`bun run eval:closet`, results in `eval/closet-results.md`): 0 missed and 0 wrong merges on the 6 confidently repeated items, 100% of items found with the right category, 88% with the right color, and 6/6 shopping matches right at @1
 
 ## Plan changes since the first draft
 
@@ -83,7 +84,7 @@ These weren't features in the plan, but the flows need them:
 | Beat | Ready? |
 |---|---|
 | Hook | ✅ |
-| The closet (pre-loaded weeks of dated fit checks) | 🟡 `bun run seed:demo` seeds 3 weeks (12 fit checks, the black jeans, an unworn Zara jacket, a stored coat, one skipped purchase) on a Neon branch; the 12 photos for `demo_images/` still need taking |
+| The closet (pre-loaded weeks of dated fit checks) | 🟡 `bun run seed:demo` builds it from 15 real photos through the live extraction and dedup (dates from filenames, squeezed into the last 21 days), plus the unworn Zara jacket, the red puffer in the under-bed bin and one skipped purchase. Not yet run on the Neon branch. |
 | Shopping: photo of black pants → your near-identical pair, still returnable | ✅ Matches from an order with an open window say "still returnable until Oct 31" |
 | Returns: order screenshot → "you haven't worn this" → "return" | ✅ "check returns" nudges the seeded Zara jacket; a live screenshot is only picked up if its order date is at least a week old |
 | Worth buying | ✅ (needs the seeded fit checks to say something interesting) |
@@ -93,7 +94,7 @@ These weren't features in the plan, but the flows need them:
 
 | Item | Status |
 |---|---|
-| README for the LLM judge | 🟡 Written; needs the vision-comparison matching and model choices folded in, plus final accuracy numbers |
+| README for the LLM judge | 🟡 Models, matching and real-photo accuracy (`eval/closet-results.md`) are in; needs a final pass |
 | Devpost page | ⬜ |
 | Public repo with setup steps | 🟡 Setup steps in the README; the repo's visibility hasn't been checked |
 | Backup demo video | ⬜ |
@@ -104,5 +105,6 @@ These weren't features in the plan, but the flows need them:
 
 ## Suggested next steps, in order
 
-1. **Demo photos and a rehearsal.** Take the 12 photos listed in `demo_images/README.md`, create the Neon branch, run `bun run seed:demo`, and walk the demo script on a real phone (plus one real order screenshot).
-2. Then the submission checklist; P2 only if time is left.
+1. **Seed and rehearse.** Create the Neon branch, run `bun run seed:demo` on the real photos, check the printed closet, and walk the demo script on a real phone (plus one real order screenshot).
+2. **Color names in bad light.** The closet eval's only extraction misses (6 of 50) are muted colors read as grey, black or khaki under dim or colored light. Try the extraction prompt fix and rerun `bun run eval:closet`.
+3. Then the submission checklist; P2 only if time is left.

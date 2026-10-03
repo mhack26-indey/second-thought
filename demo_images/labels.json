@@ -1,0 +1,118 @@
+{
+  "_note": "Draft ground truth for scripts/eval-closet.ts, labelled by eye. A label is one physical item; the same label in two photos means the same item. \"unsure\": true on an appearance means it may be a different item (excluded from merge scoring). Left out: ties, lanyards, a boutonniere (not in the item vocabulary), and anything cropped or hidden.",
+  "items": {
+    "charcoal-knit-quarterzip": { "category": "top", "color": "gray", "description": "heathered charcoal knit quarter-zip sweater, brown zip pull" },
+    "olive-fleece-quarterzip": { "category": "top", "color": "olive", "description": "olive fleece quarter-zip pullover with zip chest pocket" },
+    "navy-polo": { "category": "top", "color": "navy", "description": "navy short-sleeve polo" },
+    "beige-knit-polo": { "category": "top", "color": "beige", "description": "beige short-sleeve knit button polo" },
+    "sage-abercrombie-tee": { "category": "top", "color": "green", "description": "sage green crew-neck t-shirt with small moose logo" },
+    "light-gray-tee": { "category": "top", "color": "gray", "description": "light gray crew-neck t-shirt" },
+    "red-columbia-tee": { "category": "top", "color": "red", "description": "red t-shirt with white Columbia logo" },
+    "black-longsleeve": { "category": "top", "color": "black", "description": "black long-sleeve crew-neck shirt" },
+    "white-dress-shirt": { "category": "top", "color": "white", "description": "white button-up dress shirt" },
+    "blue-dress-shirt": { "category": "top", "color": "blue", "description": "blue button-up dress shirt" },
+    "red-puffer": { "category": "outerwear", "color": "red", "description": "red quilted hooded puffer jacket" },
+    "blue-suit-jacket": { "category": "outerwear", "color": "blue", "description": "medium blue suit jacket" },
+    "navy-suit-jacket": { "category": "outerwear", "color": "navy", "description": "navy suit jacket" },
+    "blue-suit-pants": { "category": "bottom", "color": "blue", "description": "medium blue suit trousers" },
+    "navy-suit-pants": { "category": "bottom", "color": "navy", "description": "navy suit trousers" },
+    "light-gray-dress-pants": { "category": "bottom", "color": "gray", "description": "light gray dress pants" },
+    "black-chinos": { "category": "bottom", "color": "black", "description": "black straight-leg chinos" },
+    "khaki-chinos": { "category": "bottom", "color": "beige", "description": "khaki chinos" },
+    "black-nike-cargo-joggers": { "category": "bottom", "color": "black", "description": "black Nike cargo joggers" },
+    "gray-puma-sweatpants": { "category": "bottom", "color": "gray", "description": "heather gray Puma sweatpants" },
+    "navy-sweatpants": { "category": "bottom", "color": "navy", "description": "navy drawstring sweatpants" },
+    "olive-adidas-shorts": { "category": "bottom", "color": "olive", "description": "olive Adidas shorts" },
+    "navy-adidas-shorts": { "category": "bottom", "color": "navy", "description": "dark navy Adidas shorts" },
+    "white-green-adidas-sneakers": { "category": "shoes", "color": "white", "description": "white Adidas sneakers with dark green stripes" },
+    "black-adidas-sambas": { "category": "shoes", "color": "black", "description": "black Adidas Samba-style sneakers with white stripes" },
+    "black-nike-sneakers": { "category": "shoes", "color": "black", "description": "black Nike running sneakers with white swoosh" },
+    "black-dress-shoes": { "category": "shoes", "color": "black", "description": "black leather dress shoes" },
+    "olive-tote": { "category": "accessory", "color": "olive", "description": "olive canvas tote bag" },
+    "black-sunglasses": { "category": "accessory", "color": "black", "description": "black sunglasses worn on the head" },
+    "black-smartwatch": { "category": "jewelry", "color": "black", "description": "black smartwatch" },
+    "black-bracelet": { "category": "jewelry", "color": "black", "description": "black band bracelet" }
+  },
+  "photos": {
+    "IMG-20251214-WA00122.jpg": [
+      { "label": "charcoal-knit-quarterzip" },
+      { "label": "black-chinos" },
+      { "label": "white-green-adidas-sneakers" }
+    ],
+    "IMG-20260114-WA0005.jpg": [
+      { "label": "charcoal-knit-quarterzip", "unsure": true }
+    ],
+    "IMG-20260710-WA0021.jpg": [
+      { "label": "blue-suit-jacket" },
+      { "label": "blue-suit-pants" },
+      { "label": "white-dress-shirt" }
+    ],
+    "IMG-20260801-WA00082.jpg": [
+      { "label": "navy-polo", "unsure": true },
+      { "label": "black-nike-cargo-joggers" },
+      { "label": "black-adidas-sambas" }
+    ],
+    "IMG-20260814-WA00002.jpg": [
+      { "label": "beige-knit-polo" },
+      { "label": "black-nike-cargo-joggers", "unsure": true },
+      { "label": "black-adidas-sambas" },
+      { "label": "black-sunglasses" },
+      { "label": "black-smartwatch", "unsure": true },
+      { "label": "black-bracelet" }
+    ],
+    "P7143138.jpg": [
+      { "label": "sage-abercrombie-tee", "unsure": true },
+      { "label": "navy-adidas-shorts" },
+      { "label": "white-green-adidas-sneakers", "unsure": true }
+    ],
+    "PXL_20250117_222812494.RAW-01.MP.COVER.jpg": [
+      { "label": "red-puffer" },
+      { "label": "light-gray-tee" },
+      { "label": "gray-puma-sweatpants" },
+      { "label": "black-nike-sneakers" }
+    ],
+    "PXL_20250628_151443062.RAW-01.COVER.jpg": [
+      { "label": "navy-suit-jacket", "unsure": true },
+      { "label": "blue-dress-shirt" },
+      { "label": "light-gray-dress-pants" },
+      { "label": "black-dress-shoes" }
+    ],
+    "PXL_20260101_072906701.RAW-02.ORIGINAL.jpg": [
+      { "label": "black-longsleeve" },
+      { "label": "gray-puma-sweatpants", "unsure": true }
+    ],
+    "PXL_20260517_003632893.PORTRAIT.jpg": [
+      { "label": "navy-suit-jacket" },
+      { "label": "navy-suit-pants" },
+      { "label": "white-dress-shirt", "unsure": true },
+      { "label": "black-dress-shoes", "unsure": true }
+    ],
+    "PXL_20260727_222520790.RAW-01.jpg": [
+      { "label": "navy-polo" },
+      { "label": "khaki-chinos" },
+      { "label": "olive-tote" },
+      { "label": "black-smartwatch" },
+      { "label": "black-sunglasses", "unsure": true }
+    ],
+    "PXL_20260727_232949503.RAW-01.jpg": [
+      { "label": "navy-polo" },
+      { "label": "khaki-chinos" },
+      { "label": "olive-tote" },
+      { "label": "black-smartwatch" }
+    ],
+    "Screenshot_20261003-183523.png": [
+      { "label": "olive-fleece-quarterzip" },
+      { "label": "olive-adidas-shorts", "unsure": true },
+      { "label": "white-green-adidas-sneakers", "unsure": true }
+    ],
+    "Screenshot_20261003-184035.png": [
+      { "label": "sage-abercrombie-tee" },
+      { "label": "olive-adidas-shorts" }
+    ],
+    "Screenshot_20261003-184451.png": [
+      { "label": "red-puffer" },
+      { "label": "red-columbia-tee" },
+      { "label": "navy-sweatpants" }
+    ]
+  }
+}
