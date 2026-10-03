@@ -2,20 +2,32 @@ import { z } from "zod";
 import { ITEM_TYPES, type ItemType } from "./closet/categories.ts";
 import { type ExtractedItem, withCategory } from "./closet/extract.ts";
 
-// A small model turns free-form texts into one structured action. Any
-// OpenAI-compatible endpoint works; the default is a local Ollama server.
-//   Local (free):  ollama pull qwen2.5:7b
-//   Hosted (free tier): LLM_BASE_URL=https://api.groq.com/openai/v1
-//                       LLM_MODEL=llama-3.1-8b-instant LLM_API_KEY=...
-const BASE_URL = process.env.LLM_BASE_URL ?? "http://localhost:11434/v1";
-// 7B, not 3B: the 3B model passed the eval too, but it was fragile: small
-// prompt changes broke other cases, and some phrasings sent it into a
-// runaway generation. 7B is ~1.5s a text on an M-series Mac.
-const MODEL = process.env.LLM_MODEL ?? "qwen2.5:7b";
-const API_KEY = process.env.LLM_API_KEY;
+// A small model turns free-form texts into structured actions, and also
+// groups color/pattern names and finds items by name. Any OpenAI-compatible
+// endpoint works.
+//
+// Default: Llama 3.1 8B on OpenRouter when OPENROUTER_API_KEY is set (the same
+// key the vision model uses), else local Ollama with qwen2.5:7b. Compared on
+// 2026-10-03 (router eval / unseen phrasings / grouping + lookup / avg time):
+//   llama-3.1-8b (OpenRouter)   48/49   15/16   24/24   ~0.3s
+//   mistral-small-3.2 (OR)      49/49   15/16   23/24   ~0.8-1.3s
+//   qwen2.5:7b (local Ollama)   49/49   14/16   23/24   ~1.1s, grouping ~14s
+//   qwen3-30b-a3b (OR)          49/49     -     23/24   ~1.8s
+// Gemini Flash-Lite and gpt-oss returned empty actions: they follow the loose
+// `actions: object[]` schema literally.
+const OPENROUTER = !process.env.LLM_BASE_URL && process.env.OPENROUTER_API_KEY;
+const BASE_URL = process.env.LLM_BASE_URL ?? (OPENROUTER ? "https://openrouter.ai/api/v1" : "http://localhost:11434/v1");
+const MODEL = process.env.LLM_MODEL ?? (OPENROUTER ? "meta-llama/llama-3.1-8b-instruct" : "qwen2.5:7b");
+const API_KEY = process.env.LLM_API_KEY ?? (OPENROUTER ? process.env.OPENROUTER_API_KEY : undefined);
 // OpenRouter only: which upstream providers may serve the model, e.g. "google-vertex".
+// Without a list, OpenRouter still only picks providers that support the
+// JSON schema (several serve Llama 8B, and not all of them do).
 const PROVIDERS = (process.env.LLM_PROVIDERS ?? "").split(",").map((p) => p.trim()).filter(Boolean);
-const PROVIDER = PROVIDERS.length ? { provider: { only: PROVIDERS, require_parameters: true } } : {};
+const PROVIDER = PROVIDERS.length
+  ? { provider: { only: PROVIDERS, require_parameters: true } }
+  : BASE_URL.includes("openrouter.ai")
+    ? { provider: { require_parameters: true } }
+    : {};
 
 // Rate limits and provider hiccups (429, 5xx) get two quick retries. Waits
 // stay short because someone is waiting on the reply to their text.
@@ -333,6 +345,16 @@ const KNOWN_WORDS: [string, ItemType][] = [
  * closet module's types, checking their description first, then the type it gave.
  * Picking from 45 types in the prompt made the small model worse at everything.
  */
+/** The item type named in a phrase ("my gray sweater" -> sweater), if any. */
+export function typeIn(text: string): ItemType | undefined {
+  return resolveType(undefined, text);
+}
+
+/** The first color word in a phrase ("the dark blue jeans" -> blue), if any. */
+export function colorIn(text: string): string | undefined {
+  return text.toLowerCase().split(/[^a-z-]+/).find((w) => COLORS.has(w));
+}
+
 function resolveType(type: unknown, description: string): ItemType | undefined {
   // Their own words first: the model sometimes relabels ("gray crewneck" as hoodie).
   for (const text of [description, String(type ?? "")]) {

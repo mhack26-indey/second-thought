@@ -1,7 +1,8 @@
 import { z } from "zod";
 import type { ExtractedItem } from "./closet/extract.ts";
 import type { Item } from "./closet/repo.ts";
-import { llmJson } from "./llm.ts";
+import { categoryOf } from "./closet/categories.ts";
+import { colorIn, llmJson, typeIn } from "./llm.ts";
 
 // Deciding whether two descriptions are the same thing. Names drift: the
 // vision model says "grey" one day and "charcoal" the next, people text
@@ -135,9 +136,34 @@ export async function matchSeenItems(seen: ExtractedItem[], owned: Item[]): Prom
 
 const FindSchema = z.object({ id: z.number().int().nullable() });
 
-/** The item someone means by "the gray crewneck", or undefined. */
+/**
+ * The item someone means by "the gray crewneck", or undefined.
+ *
+ * Code narrows the closet first: a named type keeps that type, or its category
+ * if they own none ("hat" -> accessories); a named color keeps only matching
+ * or neighboring shades.
+ * The model then picks among what's left. Asked to pick from the whole closet,
+ * every model tried sometimes answered "red hat" with the gray crewneck, which
+ * would remove the wrong item.
+ */
 export async function findItemByName(name: string, items: Item[]): Promise<Item | undefined> {
-  if (!items.length) return undefined;
+  const type = typeIn(name);
+  // The exact type if they own one ("tee" -> their t-shirts), else the category
+  // ("sweater" can still mean a crewneck).
+  const sameType = type ? items.filter((i) => i.type === type) : [];
+  let pool = sameType.length ? sameType : type ? items.filter((i) => i.category === categoryOf(type)) : items;
+  const color = colorIn(name);
+  if (color && pool.length) {
+    const asked = { color_primary: color, color_secondary: null, pattern: UNKNOWN } as ExtractedItem;
+    const g = await llmGroups([...pool, asked]).catch(() => exactGroups);
+    const want = g.color(color)!;
+    pool = pool.filter((i) => {
+      const have = g.color(i.color_primary)!;
+      return agrees(have, want) || near(have, want);
+    });
+  }
+  if (!pool.length) return undefined;
+  items = pool;
   const { id } = await llmJson(
     FindSchema,
     `Someone referred to an item in their closet as "${name}". Which of these items do they mean? Allow for different words for the same color (gray/grey/charcoal), type (crewneck/sweatshirt/sweater, sneakers/trainers) or style. If none fits, or it's a toss-up between several, return null.
