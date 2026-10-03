@@ -20,7 +20,11 @@ import { type IngestResult, ingestOutfit } from "./ingest.ts";
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error("DATABASE_URL is not set. Run `vercel env pull` or add it to .env.");
-export const sql = new SQL(url);
+// No prepared statements: Neon's pooler keeps server connections (and their
+// cached plans) across restarts, so after a migration adds a column, an old
+// cached `select * from users` fails with "cached plan must not change result
+// type" on every message.
+export const sql = new SQL(url, { prepare: false });
 
 // One connection pool for both: the closet repo talks through this adapter.
 export const db: Db = {
