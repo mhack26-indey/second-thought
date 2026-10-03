@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { ExtractedItem } from "./closet/extract.ts";
 import type { Item } from "./closet/repo.ts";
 import { categoryOf } from "./closet/categories.ts";
-import { colorIn, llmJson, typeIn } from "./llm.ts";
+import { colorIn, llmJson, patternIn, typeIn } from "./llm.ts";
 
 // Deciding whether two descriptions are the same thing. Names drift: the
 // vision model says "grey" one day and "charcoal" the next, people text
@@ -136,6 +136,46 @@ export function mostAlike(target: Item, pool: Item[], g: Groups, n = 4): Item[] 
     .sort((a, b) => b.score - a.score)
     .slice(0, n)
     .map((x) => x.i);
+}
+
+const FILLER = new Set(["a", "an", "the", "my", "of", "with", "and", "in", "on", "one", "ones", "pair", "some"]);
+
+/**
+ * Closet items for a description being typed ("grey sweats", "the puma ones"),
+ * best first: the named type (then its category), the named color group (or a
+ * neighboring shade; a clearly different color counts against), the named
+ * pattern, and matching words, where the last word can be half typed.
+ * No model call per keystroke: color names come from the groups cache.
+ */
+export function searchItems(query: string, items: Item[], g: Groups, n = 6): Item[] {
+  const q = query.toLowerCase().trim();
+  if (!q) return [];
+  const type = typeIn(q);
+  const color = colorIn(q);
+  const pattern = patternIn(q);
+  const words = (q.match(/[a-z0-9]+/g) ?? []).filter((w) => !FILLER.has(w));
+  const last = /[a-z0-9]$/.test(q) ? words.at(-1) : undefined; // still being typed
+
+  return items
+    .map((item) => {
+      let score = 0;
+      if (type) score += item.type === type ? 4 : item.category === categoryOf(type) ? 1 : -2;
+      if (color) {
+        const [want, have] = [g.color(color)!, g.color(item.color_primary)!];
+        score += want === have ? 3 : agrees(want, have) || near(want, have) ? 1 : -2;
+      }
+      if (pattern && agrees(g.pattern(pattern), g.pattern(item.pattern))) score += 1;
+      const have = new Set([...descWords(item.description), ...descWords(item.type), item.category]);
+      for (const w of words) {
+        if (have.has(w)) score += 2;
+        else if (w === last && w.length >= 2 && [...have].some((h) => h.startsWith(w))) score += 1;
+      }
+      return { item, score };
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score || a.item.description.localeCompare(b.item.description))
+    .slice(0, n)
+    .map((x) => x.item);
 }
 
 /**
