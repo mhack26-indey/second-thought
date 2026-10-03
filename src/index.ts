@@ -1,6 +1,6 @@
-import { Spectrum } from "spectrum-ts";
+import { Spectrum, attachment } from "spectrum-ts";
 import { imessage } from "@spectrum-ts/imessage";
-import { fitCheckPrompt, handlePhoto, handleText, startOnboarding } from "./flows.ts";
+import { type Reply, fitCheckPrompt, handlePhoto, handleTextMessage, startOnboarding } from "./flows.ts";
 import { warmUp } from "./llm.ts";
 import {
   claimDueReminders,
@@ -9,6 +9,7 @@ import {
   fitCheckUsers,
   getUser,
   localDate,
+  photoAt,
   releaseFitPing,
   releaseReminder,
   sql,
@@ -114,20 +115,29 @@ for await (const [space, message] of app.messages) {
 
     // The typing bubble shows while the reply is worked out (the text model
     // takes a second or two), so a slow answer doesn't look like no answer.
+    // A stored photo goes out as an image; a missing one is skipped.
+    const send = async (reply: Reply) => {
+      if (typeof reply === "string") return void (await space.send(reply));
+      const photo = await photoAt(reply.photo);
+      if (!photo) return;
+      const name = `fit-check.${photo.mimeType.split("/")[1] ?? "jpg"}`;
+      await space.send(attachment(Buffer.from(photo.image), { name, mimeType: photo.mimeType }));
+    };
+
     const later = await withTyping(space, async () => {
-      let replies: string[];
-      let later: (() => Promise<string[]>) | undefined;
+      let replies: Reply[];
+      let later: (() => Promise<Reply[]>) | undefined;
       if (!user) {
         await createUser(message.sender!.id);
         replies = startOnboarding(message.sender!.id, content.type === "text" ? content.text : undefined);
       } else if (content.type === "text") {
-        replies = await handleText(user, content.text);
+        ({ replies, later } = await handleTextMessage(user, content.text));
       } else if (content.type === "attachment") {
         ({ replies, later } = await handlePhoto(user, await content.read(), content.mimeType));
       } else {
         return undefined;
       }
-      for (const reply of replies) await space.send(reply);
+      for (const reply of replies) await send(reply);
       return later;
     });
 
@@ -136,7 +146,7 @@ for await (const [space, message] of app.messages) {
     // reading a fit check photo can take 5-30s.
     if (later) {
       void withTyping(space, async () => {
-        for (const reply of await later()) await space.send(reply);
+        for (const reply of await later()) await send(reply);
       }).catch((err) => console.error(`follow-up for message ${message.id} failed`, err));
     }
   } catch (err) {

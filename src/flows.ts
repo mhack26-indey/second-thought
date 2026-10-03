@@ -4,6 +4,7 @@ import { type ImageInput, type MediaType, visionEnabled } from "./closet/vlm.ts"
 import { type City, cityFrom, findCities } from "./cities.ts";
 import { exactGroups, findItemByName, llmGroups } from "./match.ts";
 import { WINDOW_DAYS, worthBuying } from "./gaps.ts";
+import { type BotReply, type RecentFitCheck, ShoppingMode } from "./shopping-mode.ts";
 import {
   type Item,
   type Reminder,
@@ -13,6 +14,8 @@ import {
   addTextItems,
   ingestFitCheck,
   cancelReminder,
+  db,
+  deletePhoto,
   listItems,
   listOutfits,
   localDate,
@@ -85,6 +88,7 @@ export const HELP = [
   '• "my reminders" to see your schedule',
   '• "winter jacket is in the under-bed bin", then "where\'s my winter jacket?"',
   '• "what should I buy?" to find the gap in what you wear',
+  '• "do I have this?" then a photo, to check before you buy',
   '• "fit check at 8am" or "stop fit checks"',
   '• "my profile" to see your info, "city Detroit" or "call me Sam" to change it',
   "Or send a fit check photo.",
@@ -361,22 +365,49 @@ const CHAT_REPLIES: Record<ChatKind, string> = {
   other: 'Not sure I can help with that. Text "help" to see what I can do.',
 };
 
-export interface PhotoReply {
-  replies: string[]; // send now
-  later?: () => Promise<string[]>; // slow work (the vision model); send when it's done
+export type { BotReply, Reply } from "./shopping-mode.ts";
+
+const shopping = new ShoppingMode({ db });
+
+/** Handle a text message; "do I have this?" may answer later, after the vision model. */
+export async function handleTextMessage(user: User, text: string): Promise<BotReply> {
+  const shop = user.step === "done" ? shopping.onText(user.id, text) : undefined;
+  return shop ?? { replies: await handleText(user, text) };
 }
 
 const VISION_TYPES = new Set<string>(["image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif"]);
 
-export async function handlePhoto(user: User, image: Buffer, mimeType: string): Promise<PhotoReply> {
+export async function handlePhoto(user: User, image: Buffer, mimeType: string): Promise<BotReply> {
   if (user.step !== "done") return { replies: [ASK_CITY] };
-  const outfit = await addFitCheck(user.id, image, mimeType);
-  await updateUser(user.id, { lastFitPhoto: localDate() }); // counts as today's fit check, so no ping
-  if (!visionEnabled() || !VISION_TYPES.has(mimeType)) return { replies: ["Saved your fit check."] };
+  const canRead = visionEnabled() && VISION_TYPES.has(mimeType);
+  const input: ImageInput = { base64: image.toString("base64"), mediaType: mimeType as MediaType };
 
+  // They asked "do I have this?" first: match the photo, save nothing.
+  if (shopping.takePending(user.id)) {
+    if (!canRead) return { replies: ["I can't look at that photo right now, so I can't check it against your closet."] };
+    return { replies: [], later: () => shopping.match(user.id, input) };
+  }
+
+  const outfit = await addFitCheck(user.id, image, mimeType);
+  const lastFitPhoto = user.lastFitPhoto;
+  await updateUser(user.id, { lastFitPhoto: localDate() }); // counts as today's fit check, so no ping
+  if (!canRead) return { replies: ["Saved your fit check."] };
+
+  // A "do I have this?" right after can still take it back (shopping-mode.ts).
+  const fit: RecentFitCheck = {
+    outfitId: outfit.id,
+    image: input,
+    at: Date.now(),
+    cancelled: false,
+    cleanup: async () => {
+      await deletePhoto(user.id, outfit.photoUrl);
+      await updateUser(user.id, { lastFitPhoto });
+    },
+  };
+  shopping.fitCheckSaved(user.id, fit);
   return {
     replies: ["Saved your fit check. Checking what you're wearing..."],
-    later: () => detectItems(user.id, outfit, { base64: image.toString("base64"), mediaType: mimeType as MediaType }),
+    later: () => (fit.work = detectItems(user.id, outfit, input, fit)),
   };
 }
 
@@ -384,6 +415,7 @@ async function detectItems(
   userId: string,
   outfit: { id: number; photoUrl: string },
   image: ImageInput,
+  fit: RecentFitCheck,
 ): Promise<string[]> {
   // The photo is already saved, so a vision failure only costs the item list.
   let seen: ExtractedItem[];
@@ -391,11 +423,18 @@ async function detectItems(
     seen = await extractItems(image);
   } catch (err) {
     console.error(`item extraction failed for outfit ${outfit.id}`, err);
+    if (fit.cancelled) return [];
     return ["I couldn't make out the items in that one, but the photo is saved."];
   }
+  fit.seen = seen;
+  if (fit.cancelled) return []; // it turned out to be a shopping photo
   if (!seen.length) return ["I couldn't spot any clothes in that photo."];
 
-  const { worn, added } = await oneAtATime(userId, () => ingestFitCheck(userId, outfit, seen, image));
+  const result = await oneAtATime(userId, async () =>
+    fit.cancelled ? undefined : ingestFitCheck(userId, outfit, seen, image),
+  );
+  if (!result) return [];
+  const { worn, added } = result;
   const lines: string[] = [];
   if (worn.length) lines.push(`Wearing: ${worn.map(itemName).join(", ")}.`);
   if (added.length) lines.push(`New to your closet: ${added.map(itemName).join(", ")}.`);
