@@ -9,6 +9,7 @@
     "eval": "bun scripts/eval-router.ts",
     "extract": "bun scripts/extract-test-images.ts",
     "migrate": "bun scripts/migrate.ts",
+    "seed:demo": "bun scripts/seed-demo.ts",
     "test": "bun test"
   },
   "dependencies": {

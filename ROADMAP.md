@@ -1,6 +1,6 @@
 # Roadmap status
 
-Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 2026, after the shopping check was wired in.
+Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 2026, after the demo seed script.
 
 **Legend:** ✅ done · 🟡 partly done · ⬜ not started · ✂️ dropped by a plan change
 
@@ -8,12 +8,12 @@ Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 20
 
 | Area | Status |
 |---|---|
-| P0: core (gate: hour 12) | 🟡 2 of 5 done |
+| P0: core (gate: hour 12) | ✅ 5 of 5 |
 | P1: differentiator | ✅ 3 of 3 |
 | P2: stretch | 🟡 1 of 4 |
 | Submission checklist | 🟡 README only |
 
-**The hour 12 gate isn't met.** The plan says to finish P0 before anything else. P1 is already done, so every remaining hour should go to P0: order intake, return nudges and the impact counter. The demo script depends on all three.
+**P0 is done, so the hour 12 gate is met** (built in code; still to be checked live end to end). P1 is done too. Next: demo data, then the submission checklist; P2 only if time is left.
 
 ## P0: core
 
@@ -21,9 +21,9 @@ Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 20
 |---|---|---|
 | **Closet intake** | ✅ | Fit check photos become items (type, color, pattern, fit, season) and log wears; repeat items match instead of duplicating (vision comparison, falling back to name matching). Items can also be added by text. HEIC works. |
 | **"Do I already have this?"** | ✅ | "do I have this?" (or "shopping", "checking something") makes the next photo within 5 minutes a shopping photo: matched, not saved. Sent within 2 minutes *after* a photo, it takes that fit check back out and matches the same photo. Replies with up to 3 owned items (the model's reason, month owned) and the top match's photo (`src/shopping-mode.ts`). |
-| **Order intake** | ⬜ | The `purchases` and `return_policies` tables exist but nothing writes to them. Needed: parse an order screenshot (vision model), add the item with `source = 'order'`, log retailer, price and return deadline. |
-| **Return nudges** | ⬜ | The reminder scheduler works (one-off reminders, daily fit checks, sent once even across restarts). Missing: a reminder before each return deadline, "you haven't worn this yet" from `wears`, and the "return" reply flow. |
-| **Impact counter** | ⬜ | Nothing tracks purchases avoided or money recovered. Natural sources: a shopping check that found a match (avoided) and a purchase marked returned (recovered). |
+| **Order intake** | ✅ | The fit check extraction also returns `image_kind` (fit_check / order_screenshot / product), so spotting an order screenshot costs no extra call. A screenshot comes back out of the fit checks, and one more vision call reads retailer, order date (today if none shown) and line items. Each line becomes a purchase (deadline = order date + the retailer's return days; unknown retailers get 30 days and the reply says so) and a closet item with `source = 'order'`. Dedup runs as for fit checks: ordering jeans you already own links the order to them and warns "Heads up: you already own…". Replies end "Verify on the retailer's site." A `product` photo (a listing or store shot) skips the fit checks too and gets the shopping match. (`src/orders.ts`, `src/photo-intake.ts`) |
+| **Return nudges** | ✅ | Once a day from 10am, the scheduler nudges each `kept` purchase whose window closes within 3 days and whose item hasn't been in a fit check since the order: "You haven't worn the black jeans from Zara in any fit checks yet. Return window closes Oct 6. Keeping it? Reply keep or return." Claimed before sending (`purchases.nudged_at`), so each purchase is nudged once. "return" marks the purchase `returning` and the item `returned` and links the retailer's returns page (`return_policies.returns_url`); "keep" confirms; "returned it" marks it `returned`. "check returns" runs the check now, any deadline, for orders at least 7 days old, for the demo. (`src/returns.ts`) |
+| **Impact counter** | ✅ | `impact_events` records an `avoided` event each time a shopping check (shopping mode or a product photo) finds a match (at most once per item per day, so re-checking the same jacket doesn't inflate it), with the top match's order price if it came from an order, and a `recovered` event with the price when a purchase goes `returning` or `returned`, once per purchase. "my impact" (or "my stats", "how am I doing") replies "You've skipped 2 purchases and gotten $49.90 back." plus "That's 2 fewer things in your closet you didn't need." The wardrobe page shows the same totals at the top. No estimated CO₂ or water numbers. (`src/impact.ts`) |
 
 ## P1: differentiator
 
@@ -65,7 +65,7 @@ These weren't features in the plan, but the flows need them:
 | Photon sending and receiving a photo | ✅ iMessage and RCS both work |
 | Neon database live | ✅ (pgvector ✂️ no longer needed) |
 | Extraction prompt run on real fit checks | ✅ `bun run extract` on 10 attributed test photos, plus a live JPEG/HEIC check |
-| Return-policy table for the top 15 retailers | ⬜ Table exists, empty |
+| Return-policy table for the top 15 retailers | ✅ Seeded in `src/schema.sql` (Amazon, Target, H&M, Zara, Uniqlo, Nike, Adidas, Abercrombie, American Eagle, Urban Outfitters, Lululemon, Gap, Old Navy, Nordstrom, Shein) |
 
 ## Data model vs plan
 
@@ -74,8 +74,8 @@ These weren't features in the plan, but the flows need them:
 | items: photo, type, color, pattern, season, source, location, status | ✅ All there, plus fit, description, `location_set_at`. Status values are `active` / `returned` / `removed` (plan: owned / returned / sold). |
 | outfits: photo, date, temperature | 🟡 No `temperature` yet (needed for closet ghosts) |
 | wears | ✅ |
-| purchases | 🟡 Table only |
-| return_policies | 🟡 Table only, no rows |
+| purchases | ✅ Written by order intake, linked from `items.purchase_id` |
+| return_policies | ✅ 15 retailers |
 | users: phone, city | ✅ Plus name, daily fit check hour, wardrobe page token |
 
 ## Demo script readiness
@@ -83,11 +83,11 @@ These weren't features in the plan, but the flows need them:
 | Beat | Ready? |
 |---|---|
 | Hook | ✅ |
-| The closet (pre-loaded weeks of dated fit checks) | ⬜ Needs seed data; the plan suggests a Neon branch to keep it safe |
-| Shopping: photo of black pants → your near-identical pair, still returnable | 🟡 Match and photo reply work; "still returnable" needs order intake |
-| Returns: order screenshot → "you haven't worn this" → "return" | ⬜ |
+| The closet (pre-loaded weeks of dated fit checks) | 🟡 `bun run seed:demo` seeds 3 weeks (12 fit checks, the black jeans, an unworn Zara jacket, a stored coat, one skipped purchase) on a Neon branch; the 12 photos for `demo_images/` still need taking |
+| Shopping: photo of black pants → your near-identical pair, still returnable | ✅ Matches from an order with an open window say "still returnable until Oct 31" |
+| Returns: order screenshot → "you haven't worn this" → "return" | ✅ "check returns" nudges the seeded Zara jacket; a live screenshot is only picked up if its order date is at least a week old |
 | Worth buying | ✅ (needs the seeded fit checks to say something interesting) |
-| Close on the impact counter | ⬜ |
+| Close on the impact counter | ✅ Text "my impact", or open the wardrobe page |
 
 ## Submission checklist
 
@@ -104,8 +104,5 @@ These weren't features in the plan, but the flows need them:
 
 ## Suggested next steps, in order
 
-1. **Order screenshots → purchases.** Extract retailer, item, price and order date; compute the deadline from `return_policies` (fill in ~15 retailers); add the item with `source = 'order'`.
-2. **Return nudges.** A reminder a few days before each deadline, and "hasn't shown up in a fit check" from `wears`; handle the "return" reply.
-3. **Impact counter.** Count shopping checks that found a match, plus returned purchases and their prices; show it in a reply and on the wardrobe page.
-4. **Seed demo data** on a Neon branch: a few weeks of dated fit checks and a couple of orders.
-5. Then the submission checklist; P2 only if time is left.
+1. **Demo photos and a rehearsal.** Take the 12 photos listed in `demo_images/README.md`, create the Neon branch, run `bun run seed:demo`, and walk the demo script on a real phone (plus one real order screenshot).
+2. Then the submission checklist; P2 only if time is left.

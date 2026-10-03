@@ -11,9 +11,11 @@ import {
   localDate,
   photoAt,
   releaseFitPing,
+  db,
   releaseReminder,
   sql,
 } from "./store.ts";
+import { claimNudges, releaseNudge } from "./returns.ts";
 import { startWebServer } from "./web.ts";
 
 // Spectrum bridges a single agent loop to many messaging interfaces.
@@ -65,6 +67,28 @@ async function sendDueReminders() {
   }
 }
 
+// Return nudges go out once a day, from this hour on (server local time), so
+// nobody gets one at 3am. Each purchase is claimed before sending (returns.ts),
+// so a restart re-runs the pass without sending anything twice.
+const NUDGE_HOUR = 10;
+let lastNudgeDay: string | undefined;
+
+async function sendReturnNudges() {
+  const now = new Date();
+  const today = localDate(now);
+  if (now.getHours() < NUDGE_HOUR || lastNudgeDay === today) return;
+  const nudges = await claimNudges(db, { today });
+  lastNudgeDay = today; // after the claim, so a failed query retries next tick
+  for (const nudge of nudges) {
+    try {
+      await sendTo(nudge.userId, nudge.text);
+    } catch (err) {
+      await releaseNudge(db, nudge.purchaseId);
+      console.error(`return nudge for purchase ${nudge.purchaseId} failed`, err);
+    }
+  }
+}
+
 // One tick at a time: a slow database or send shouldn't stack up overlapping runs.
 let ticking = false;
 async function tick() {
@@ -72,6 +96,7 @@ async function tick() {
   ticking = true;
   try {
     await sendDueReminders();
+    await sendReturnNudges();
   } catch (err) {
     console.error("scheduler tick failed", err);
   } finally {

@@ -1,6 +1,8 @@
 import type { Db } from "./db/client.ts";
+import { formatDay } from "./closet/dates.ts";
 import type { ExtractedItem } from "./closet/extract.ts";
 import { deleteOutfit } from "./closet/repo.ts";
+import { recordAvoided } from "./impact.ts";
 import { type ShoppingResult, matchShoppingPhoto } from "./closet/shopping.ts";
 import type { ImageInput } from "./closet/vlm.ts";
 
@@ -42,6 +44,7 @@ export interface RecentFitCheck {
   image: ImageInput;
   at: number; // epoch ms
   cancelled: boolean; // set on undo; the fit check's ingest checks it
+  notFitCheck?: boolean; // an order screenshot or product photo, so there's no fit check to take back
   seen?: ExtractedItem[]; // what the fit check read, so the match needn't read it again
   work?: Promise<unknown>; // the fit check's vision work, while it runs
   cleanup?: () => Promise<void>; // what the closet tables don't hold (the stored photo)
@@ -64,7 +67,7 @@ export class ShoppingMode {
     if (!isShoppingAsk(text)) return undefined;
     const fit = this.recent.get(userId);
     this.recent.delete(userId);
-    if (fit && this.now() - fit.at <= UNDO_MS) {
+    if (fit && !fit.notFitCheck && this.now() - fit.at <= UNDO_MS) {
       fit.cancelled = true;
       return { replies: [], later: () => this.undoAndMatch(userId, fit) };
     }
@@ -83,15 +86,26 @@ export class ShoppingMode {
     this.recent.set(userId, fit);
   }
 
-  /** Matches a shopping photo against the closet. Nothing is saved. */
+  /**
+   * Matches a shopping photo against the closet. Nothing goes in the closet;
+   * a match counts as a purchase skipped for the impact counter (impact.ts).
+   */
   async match(userId: string, image: ImageInput, seen?: ExtractedItem[]): Promise<Reply[]> {
     const deps = seen ? { ...this.deps.match, extract: async () => seen } : this.deps.match;
+    let result: ShoppingResult;
     try {
-      return shoppingReplies(await matchShoppingPhoto(this.deps.db, userId, image, deps), new Date(this.now()));
+      result = await matchShoppingPhoto(this.deps.db, userId, image, deps);
     } catch (err) {
       console.error(`shopping match failed for ${userId}`, err);
       return ["I couldn't make out that photo. Try another one?"];
     }
+    const top = result.matches[0];
+    if (top) {
+      await recordAvoided(this.deps.db, userId, top.item_id, new Date(this.now())).catch((err) =>
+        console.error(`impact event for ${userId} failed`, err),
+      );
+    }
+    return shoppingReplies(result, new Date(this.now()));
   }
 
   private async undoAndMatch(userId: string, fit: RecentFitCheck): Promise<Reply[]> {
@@ -109,7 +123,10 @@ export function shoppingReplies(result: ShoppingResult, now = new Date()): Reply
     const query = encodeURIComponent(result.seen[0]!.description);
     return [`Nothing like it in your closet.\nSecondhand: https://www.depop.com/search/?q=${query}`];
   }
-  const lines = result.matches.map((m) => `• ${m.description}: ${m.reason} (since ${month(m.owned_since, now)})`);
+  const lines = result.matches.map((m) => {
+    const returnable = m.returnable_until ? `, still returnable until ${formatDay(m.returnable_until)}` : "";
+    return `• ${m.description}: ${m.reason} (since ${month(m.owned_since, now)}${returnable})`;
+  });
   const replies: Reply[] = [[`You already have ${result.matches.length} like this:`, ...lines].join("\n")];
   const photo = result.matches[0]!.photo_url;
   if (photo) replies.push({ photo });

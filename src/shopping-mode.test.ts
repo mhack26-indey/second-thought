@@ -31,6 +31,7 @@ let db: Db;
 let clock: number;
 beforeEach(async () => {
   db = await testDb();
+  await db.query(`INSERT INTO users (id, web_token) VALUES ('u1', 'token-u1')`);
   clock = Date.parse("2026-10-03T12:00:00Z");
 });
 
