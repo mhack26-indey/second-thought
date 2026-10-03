@@ -2,6 +2,8 @@
 
 Oct 3, 2026 · @Sath S
 
+**Status:** what's built and what's left is tracked in [ROADMAP.md](ROADMAP.md).
+
 ## Overview
 
 We're building Second Thought, an iMessage bot that knows your closet: what not to buy, what to return, the one thing worth buying, and what to let go, season by season.
@@ -19,9 +21,9 @@ Go with Sustainability as the main track. The core of the product is not buying 
 | Track | Decision | Why |
 |---|---|---|
 | Sustainability (main) | Yes | The most sustainable clothes are the ones you already own |
-| Judged by an LLM (fun) | Yes | Vision extraction, embeddings, and gap logic are technically strong; a clear README matters most here |
+| Judged by an LLM (fun) | Yes | Vision extraction, vision-model matching, and gap logic are technically strong; a clear README matters most here |
 | Photon | Yes, core | The whole product lives in iMessage; 1st place also fast-tracks to Photon's final interview |
-| Neon | Yes | One Postgres database with pgvector holds the closet and the similarity search |
+| Neon | Yes | One Postgres database holds the closet, wears, and purchases; a Neon branch keeps the seeded demo data safe |
 | Best Design (Figma) | Yes, if time | Needs Figma screens plus polished recap cards and a small closet page; one person for about 3 hours |
 | Nessie | Stretch, decide at hour 12 | Auto-detecting purchases from transactions is a real use, but it's not core |
 | SpacetimeDB | No | The friends feature is dropped, and it would compete with Neon as the core backend |
@@ -85,7 +87,7 @@ Every flow starts with a text or a photo; the bot replies in one or two short me
 
 ## Architecture
 
-One app server receives every iMessage through Photon, calls the vision model and embeddings, and keeps everything in Neon.
+One app server receives every iMessage through Photon, calls the vision model, and keeps everything in Neon.
 
 The scheduler is the only thing that messages first; everything else is a reply. Nessie is dashed because it's a stretch goal.
 
@@ -93,7 +95,7 @@ The scheduler is the only thing that messages first; everything else is a reply.
 
 - **Messaging:** Photon (use whichever language its SDK supports best; confirm in the handbook in hour 0)
 - **Extraction:** a vision-capable LLM API that returns structured JSON per item
-- **Similarity:** CLIP image embeddings stored in Neon with the pgvector extension
+- **Similarity:** SQL pulls same-category candidates, then the VLM compares the photo against them (no embeddings)
 - **Weather:** Open-Meteo (free, no API key) for season-aware logic
 - **Reminders:** a scheduled job that checks deadlines every hour
 
@@ -101,7 +103,7 @@ The scheduler is the only thing that messages first; everything else is a reply.
 
 | Table | Key fields |
 |---|---|
-| items | photo, type, color, pattern, season, embedding, source (fit check, order, closet photo), location, status (owned, returned, sold) |
+| items | photo, type, color, pattern, season, source (fit check, order, closet photo), location, status (owned, returned, sold) |
 | outfits | fit check photo, date, temperature |
 | wears | item, outfit (which items were worn together; this powers outfit gaps) |
 | purchases | item, retailer, price, order date, return deadline, status |
@@ -114,7 +116,7 @@ Split along the two halves of the system so nobody blocks anyone after hour 2.
 
 | Role | Owns | Default owner |
 |---|---|---|
-| Vision and matching | Item extraction prompt, CLIP embeddings, similarity search, outfit-gap logic | Sath |
+| Vision and matching | Item extraction prompt, VLM comparison, similarity search, outfit-gap logic | Sath |
 | Messaging and flows | Photon setup, intent routing, conversation replies, reminder scheduler | q |
 | Data and returns | Neon schema, order screenshot parsing, return-policy table | Whoever finishes their P0 piece first |
 | Design and pitch | Figma screens, recap card, closet page, demo script, Devpost | Shared from hour 16 |
@@ -131,10 +133,10 @@ The hour 12 gate is the one that matters: if the five core features don't all wo
 
 ### Hour 0 tasks (do these before anything else)
 
-- [ ] Get Photon sending and receiving a photo (find their mentor if stuck)
-- [ ] Create the Neon database and enable pgvector
-- [ ] Run the extraction prompt on 5 real fit checks and check the JSON
-- [ ] Write the return-policy table for the top 15 retailers
+- [x] Get Photon sending and receiving a photo (find their mentor if stuck)
+- [x] Create the Neon database ~~and enable pgvector~~ (no longer needed: matching uses the vision model)
+- [x] Run the extraction prompt on 5 real fit checks and check the JSON
+- [x] Write the return-policy table for the top 15 retailers
 
 ## Demo script
 
@@ -170,7 +172,7 @@ Photon setup is the biggest risk, so it's the first thing built.
 |---|---|
 | Photon setup takes hours or images don't come through | Hit it in hour 0 with a sponsor mentor; build the backend against a test endpoint meanwhile |
 | Mirror selfies with several items extract badly | Test with real fit checks by hour 4; fall back to one item per photo |
-| Similarity matches look wrong | Combine embedding similarity with the extracted type and color; show the top 2 with photos so near-misses still help |
+| Similarity matches look wrong | Narrow candidates by category first, then fix the VLM comparison prompt using the eval set; show the top matches with photos so near-misses still help |
 | Return policies are wrong | Hardcoded table for about 15 retailers, plus "verify on the retailer's site" in every reminder |
 | Cold start makes the demo thin | Seed a few weeks of dated fit checks and orders from your own closet |
 | Scope creep | Hour 12 gate and hour 19 feature freeze; anything not in Features waits for after MHacks |

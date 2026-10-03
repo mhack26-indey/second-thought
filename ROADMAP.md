@@ -1,6 +1,6 @@
 # Roadmap status
 
-Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 2026, after the real-photo seed and closet eval.
+Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 2026, after PR #15 (fixing fit checks by hand and by text).
 
 **Legend:** ✅ done · 🟡 partly done · ⬜ not started · ✂️ dropped by a plan change
 
@@ -11,15 +11,15 @@ Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 20
 | P0: core (gate: hour 12) | ✅ 5 of 5 |
 | P1: differentiator | ✅ 3 of 3 |
 | P2: stretch | 🟡 1 of 4 |
-| Submission checklist | 🟡 README only |
+| Submission checklist | 🟡 README only; **the repo is still private** |
 
-**P0 is done, so the hour 12 gate is met** (built in code; still to be checked live end to end). P1 is done too. Next: demo data, then the submission checklist; P2 only if time is left.
+**P0 is done, so the hour 12 gate is met** (built in code; still to be checked live end to end). P1 is done too, and misread fit checks can now be fixed on the wardrobe page or by text. Next: make the repo public, seed and rehearse the demo, then the rest of the submission checklist; P2 only if time is left.
 
 ## P0: core
 
 | Feature | Status | Notes |
 |---|---|---|
-| **Closet intake** | ✅ | Fit check photos become items (type, color, pattern, fit, season) and log wears; repeat items match instead of duplicating (vision comparison, falling back to name matching). Items can also be added by text. HEIC works. |
+| **Closet intake** | ✅ | Fit check photos become items (type, color, pattern, fit, season) and log wears; repeat items match instead of duplicating (vision comparison, falling back to name matching). Items can also be added by text. HEIC works. When the model misreads a photo, it can be fixed on the wardrobe page (merge a split item, unlink, link or add by name) or by text about the latest fit check ("you missed my watch", "that's not a blouse, it's a polo"). |
 | **"Do I already have this?"** | ✅ | "do I have this?" (or "shopping", "checking something") makes the next photo within 5 minutes a shopping photo: matched, not saved. Sent within 2 minutes *after* a photo, it takes that fit check back out and matches the same photo. Replies with up to 3 owned items (the model's reason, month owned) and the top match's photo (`src/shopping-mode.ts`). |
 | **Order intake** | ✅ | The fit check extraction also returns `image_kind` (fit_check / order_screenshot / product), so spotting an order screenshot costs no extra call. A screenshot comes back out of the fit checks, and one more vision call reads retailer, order date (today if none shown) and line items. Each line becomes a purchase (deadline = order date + the retailer's return days; unknown retailers get 30 days and the reply says so) and a closet item with `source = 'order'`. Dedup runs as for fit checks: ordering jeans you already own links the order to them and warns "Heads up: you already own…". Replies end "Verify on the retailer's site." A `product` photo (a listing or store shot) skips the fit checks too and gets the shopping match. (`src/orders.ts`, `src/photo-intake.ts`) |
 | **Return nudges** | ✅ | Once a day from 10am, the scheduler nudges each `kept` purchase whose window closes within 3 days and whose item hasn't been in a fit check since the order: "You haven't worn the black jeans from Zara in any fit checks yet. Return window closes Oct 6. Keeping it? Reply keep or return." Claimed before sending (`purchases.nudged_at`), so each purchase is nudged once. "return" marks the purchase `returning` and the item `returned` and links the retailer's returns page (`return_policies.returns_url`); "keep" confirms; "returned it" marks it `returned`. "check returns" runs the check now, any deadline, for orders at least 7 days old, for the demo. (`src/returns.ts`) |
@@ -52,6 +52,10 @@ These weren't features in the plan, but the flows need them:
 - Wardrobe page (`/w/<token>`): items with locations, fit check photos, reminders, an editable profile. This is the plan's "one closet page".
 - Landing page with a QR code that texts the bot
 - Typing bubble while the bot works
+- Wardrobe page shows which photos each item came from: thumbnails per item with a wear count, items listed under each fit check, linked both ways; tapping an item opens its photos large with a view transition (#11, #12)
+- Fit check editor on the wardrobe page (`/w/<token>/fit/<id>`): "Same as this" merges an item the model split in two (suggestions ranked by type, LLM color groups, pattern and words), "Not in this photo" unlinks (and removes an item only that photo produced), and a search box suggests closet items as you describe one ("grey sweats", "pu…") or adds it as new (#13, #14)
+- Corrections by text for the latest fit check: same as / relabel / missed / not there (#15)
+- Find-by-name narrows by type and color in code before the model picks, so "sold my red hat" can't remove a gray crewneck (#8)
 - Closet accuracy eval on 15 real photos (`bun run eval:closet`, results in `eval/closet-results.md`): 0 missed and 0 wrong merges on the 6 confidently repeated items, 100% of items found with the right category, 88% with the right color, and 6/6 shopping matches right at @1
 
 ## Plan changes since the first draft
@@ -84,7 +88,7 @@ These weren't features in the plan, but the flows need them:
 | Beat | Ready? |
 |---|---|
 | Hook | ✅ |
-| The closet (pre-loaded weeks of dated fit checks) | 🟡 `bun run seed:demo` builds it from 15 real photos through the live extraction and dedup (dates from filenames, squeezed into the last 21 days), plus the unworn Zara jacket, the red puffer in the under-bed bin and one skipped purchase. Not yet run on the Neon branch. |
+| The closet (pre-loaded weeks of dated fit checks) | 🟡 `bun run seed:demo` builds it from 15 real photos through the live extraction and dedup (dates from filenames, squeezed into the last 21 days), plus the unworn Zara jacket, the red puffer in the under-bed bin and one skipped purchase. Not yet run on the Neon branch. The 15 photos were imported into Inesh's own account on the main database (38 items, 16 fit checks) to try the editor; a few duplicates show there (two grey sweatpants, two black dress shoes) and can be merged with "Same as this". |
 | Shopping: photo of black pants → your near-identical pair, still returnable | ✅ Matches from an order with an open window say "still returnable until Oct 31" |
 | Returns: order screenshot → "you haven't worn this" → "return" | ✅ "check returns" nudges the seeded Zara jacket; a live screenshot is only picked up if its order date is at least a week old |
 | Worth buying | ✅ (needs the seeded fit checks to say something interesting) |
@@ -94,17 +98,32 @@ These weren't features in the plan, but the flows need them:
 
 | Item | Status |
 |---|---|
-| README for the LLM judge | 🟡 Models, matching and real-photo accuracy (`eval/closet-results.md`) are in; needs a final pass |
+| README for the LLM judge | 🟡 Models, matching and real-photo accuracy (`eval/closet-results.md`) are in; needs the fit check editor, text corrections and the photo links, then a final pass |
 | Devpost page | ⬜ |
-| Public repo with setup steps | 🟡 Setup steps in the README; the repo's visibility hasn't been checked |
+| Public repo with setup steps | 🟡 Setup steps in the README, but `mhack26-indey/photon-db` is **private**: make it public before submitting |
 | Backup demo video | ⬜ |
 | Figma file | ⬜ |
 | iMessage screenshots | ⬜ |
 | Sponsor requirements checked | ⬜ |
 | Two pitch run-throughs | ⬜ |
 
+## Known issues
+
+| Issue | Impact | Fix |
+|---|---|---|
+| Repo is private | Submission requires a public repo | Flip visibility on GitHub (and check nothing sensitive is committed: demo photos and `.env` are gitignored) |
+| Photo calls only go to Google Vertex's priority tier | If that tier fails, every photo fails (photos are still saved, just not read) | Add a fallback provider in `src/closet/vlm.ts` |
+| Some duplicates get through | Closet eval: 36 items for 31 real ones | Fix by hand with the editor; for the eval, tune the comparison prompt |
+| Muted colors read as grey/black/khaki in dim light | 6 of 50 colors wrong in the closet eval | Extraction prompt fix, rerun `bun run eval:closet` |
+| "fit checks at 7:30" (no am/pm) means 7:30 PM | Every text model tried reads it that way | Default bare times for fit checks to the morning |
+| "do I have this?" after a photo of one of your texted items | The texted item keeps details copied from the shopping photo | Delay filling in a texted item's details until the 2-minute undo window has passed (`src/ingest.ts`) |
+| Waiting states live in memory | A restart drops an open "do I have this?" window or a new user's first message held during onboarding | Acceptable for the demo; store them in the database if it matters |
+
 ## Suggested next steps, in order
 
-1. **Seed and rehearse.** Create the Neon branch, run `bun run seed:demo` on the real photos, check the printed closet, and walk the demo script on a real phone (plus one real order screenshot).
-2. **Color names in bad light.** The closet eval's only extraction misses (6 of 50) are muted colors read as grey, black or khaki under dim or colored light. Try the extraction prompt fix and rerun `bun run eval:closet`.
-3. Then the submission checklist; P2 only if time is left.
+1. **Make the repo public** (after a quick check that nothing sensitive is committed).
+2. **Seed and rehearse.** Create the Neon branch, run `bun run seed:demo` on the real photos, check the printed closet, merge any duplicates with the fit check editor, and walk the demo script on a real phone (plus one real order screenshot and one text correction).
+3. **README pass:** add the fit check editor, text corrections and photo links; final read for the LLM judge.
+4. **Color names in bad light.** Try the extraction prompt fix and rerun `bun run eval:closet`.
+5. **A fallback provider for photo calls**, so one provider outage doesn't stop photo reading during the demo.
+6. Then the rest of the submission checklist (Devpost, backup video, Figma, screenshots, sponsor requirements, pitch run-throughs); P2 only if time is left.
