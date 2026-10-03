@@ -26,9 +26,13 @@ if (!url) throw new Error("DATABASE_URL is not set. Run `vercel env pull` or add
 // type" on every message.
 export const sql = new SQL(url, { prepare: false });
 
+// Without prepared statements, Bun sends a Date as its toString() ("Sat Oct 03
+// 2026 19:40:00 GMT-0400"), which Postgres rejects. Send ISO strings instead.
+const param = (v: unknown) => (v instanceof Date ? v.toISOString() : v);
+
 // One connection pool for both: the closet repo talks through this adapter.
 export const db: Db = {
-  query: async (text, params = []) => [...(await sql.unsafe(text, params as any[]))],
+  query: async (text, params = []) => [...(await sql.unsafe(text, params.map(param) as any[]))],
 };
 
 await migrate(db);
@@ -226,7 +230,7 @@ export async function pendingReminders(userId: string): Promise<Reminder[]> {
 }
 
 export async function addReminder(userId: string, at: number, text: string): Promise<void> {
-  await sql`insert into reminders (user_id, text, due_at) values (${userId}, ${text}, ${new Date(at)})`;
+  await sql`insert into reminders (user_id, text, due_at) values (${userId}, ${text}, ${new Date(at).toISOString()})`;
 }
 
 /** Deletes an unsent reminder; false if it was already sent or cancelled. */
