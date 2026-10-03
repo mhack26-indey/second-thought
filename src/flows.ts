@@ -1,6 +1,6 @@
 import { type Action, type ChatKind, route } from "./llm.ts";
 import { type ExtractedItem, extractItems } from "./closet/extract.ts";
-import type { ImageInput, MediaType } from "./closet/vlm.ts";
+import { type ImageInput, type MediaType, visionEnabled } from "./closet/vlm.ts";
 import { exactGroups, findItemByName, llmGroups } from "./match.ts";
 import { WINDOW_DAYS, worthBuying } from "./gaps.ts";
 import {
@@ -344,7 +344,7 @@ export async function handlePhoto(user: User, image: Buffer, mimeType: string): 
   if (user.step !== "done") return { replies: [ASK_CITY] };
   const outfit = await addFitCheck(user.id, image, mimeType);
   await updateUser(user.id, { lastFitPhoto: localDate() }); // counts as today's fit check, so no ping
-  if (!process.env.GEMINI_API_KEY || !VISION_TYPES.has(mimeType)) return { replies: ["Saved your fit check."] };
+  if (!visionEnabled() || !VISION_TYPES.has(mimeType)) return { replies: ["Saved your fit check."] };
 
   return {
     replies: ["Saved your fit check. Checking what you're wearing..."],

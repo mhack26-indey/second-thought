@@ -45,7 +45,7 @@ iMessage ──► Spectrum (Photon) ──► src/index.ts ── message loop 
 
 **Two models, each doing what it's good at.**
 
-- **Vision: Gemini** (`src/closet/vlm.ts`, `src/closet/extract.ts`). A fit check photo becomes a list of items, each with type (from a fixed list of 42), category, colors, pattern, fit, season and a short description. Output is forced into a JSON schema and validated with zod. HEIC photos straight from an iPhone work.
+- **Vision: Gemini through OpenRouter** (`src/closet/vlm.ts`, `src/closet/extract.ts`). A fit check photo becomes a list of items, each with type (from a fixed list of 42), category, colors, pattern, fit, season and a short description. Output is forced into a JSON schema and validated with zod. HEIC photos straight from an iPhone work.
 - **Text: a local `qwen2.5:7b`** through Ollama (`src/llm.ts`), or any OpenAI-compatible endpoint. It turns a free-form text into validated actions, using a prompt with few-shot examples. Exact commands like `my wardrobe` and `help` skip the model entirely. It also handles every naming judgment (below), so those don't use up the vision model's small free-tier quota.
 
 **Matching: is this the item they already own?** (`src/match.ts`, `src/ingest.ts`)
@@ -87,7 +87,7 @@ All in Neon Postgres. Tables are created on startup (or with `bun run migrate`).
 
 ## Setup
 
-You need [Bun](https://bun.sh), [Ollama](https://ollama.com), a Photon project, a Gemini API key, and a Neon database.
+You need [Bun](https://bun.sh), [Ollama](https://ollama.com), a Photon project, an OpenRouter API key, and a Neon database.
 
 ```sh
 bun install
@@ -101,8 +101,8 @@ bun start
 |---|---|---|
 | `PROJECT_ID`, `PROJECT_SECRET` | yes | Spectrum credentials from the [Photon dashboard](https://app.photon.codes) |
 | `DATABASE_URL` | yes | Neon Postgres connection string |
-| `GEMINI_API_KEY` | for photos | Without it, photos are saved but not read |
-| `GEMINI_MODEL` | no | Defaults to `gemini-3.8-flash`. The free tier allows 20 requests per model per day, so switch models (or enable billing) for demos. |
+| `OPENROUTER_API_KEY` | for photos | Without it, photos are saved but not read |
+| `VISION_MODEL` | no | Any OpenRouter vision model with structured outputs. Defaults to `google/gemini-3.8-flash` (about $0.004 per photo). |
 | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | no | Text model; defaults to local Ollama with `qwen2.5:7b` |
 | `PORT`, `PUBLIC_URL` | no | Web server; links default to this machine's LAN address on port 3000, so phones on the same Wi-Fi can open them |
 | `BOT_NUMBER` | no | The number on the landing page's QR code |
