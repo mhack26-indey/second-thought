@@ -83,6 +83,10 @@ export type Action =
   | { action: "set_location"; name: string; location: string }
   | { action: "find_item"; name: string }
   | { action: "worth_buying" }
+  | { action: "fit_same"; name: string; as: string }
+  | { action: "fit_relabel"; name: string; as: string }
+  | { action: "fit_missing"; name: string }
+  | { action: "fit_not_there"; name: string }
   | { action: "show_profile" }
   | { action: "update_profile"; city?: string; name?: string }
   | { action: "help" }
@@ -109,12 +113,18 @@ Possible actions:
 {"action":"set_location","name":"<the item, as written in their items if it's there>","location":"<where they put it, in their words>"}   (they say where they keep or put something)
 {"action":"find_item","name":"<the item, as written in their items if it's there>"}   (they ask where something is)
 {"action":"worth_buying"}   (they ask what they should buy, get next, or are missing)
+Corrections to their latest fit check photo (what the bot read from it is in "Their latest fit check"):
+{"action":"fit_same","name":"<item in the fit check>","as":"<the item they already own that it really is>"}   ("the X is actually my Y", "that's my Y, not a new one")
+{"action":"fit_relabel","name":"<item in the fit check>","as":"<what it really is, in their words>"}   ("the X is actually a Y", "it's not an X, it's a Y")
+{"action":"fit_missing","name":"<the item, in their words>"}   ("you missed my X", "I'm also wearing X")
+{"action":"fit_not_there","name":"<item in the fit check>"}   ("there's no X in that", "X isn't in the photo")
 {"action":"show_profile"}   (their info / profile / settings)
 {"action":"update_profile","city":"<new city, optional>","name":"<what to call them, optional>"}   (they moved, or tell you their name; leave city out if they didn't name one)
 {"action":"help"}   (they ask what the bot can do)
 {"action":"chat","kind":"greeting|thanks|style|other"}   (small talk; "style" = any question about how something looks or what to wear)
 
 Rules:
+- Use the fit_ corrections only when they talk about what the bot read from their photo ("you missed", "actually", "isn't in that", "not a"). Getting rid of something they own is remove_item; buying something is add_items.
 - Use add_items only when they say they own, bought, or got clothes. Leave out color, pattern, or fit if they didn't say it. Include every item they mention, even ones already in their items (duplicates are handled later).
 - "type" is the kind of item in a word or two: jeans, hoodie, sneakers, blazer, earrings...
 - Do the reminder time math in fields, never by hand: "tonight at 9" is days_from_now 0, time "21:00".
@@ -122,7 +132,8 @@ Rules:
 - Never repeat an action or add one they didn't ask for.`;
 
 // Few-shot examples, formatted exactly like real requests.
-const EX_CONTEXT = "Their reminders: 1. return the green jacket (Sat 1:00 PM); 2. check the zara refund (Mon 9:00 AM)\nTheir items: black jeans, gray crewneck";
+const EX_CONTEXT =
+  "Their reminders: 1. return the green jacket (Sat 1:00 PM); 2. check the zara refund (Mon 9:00 AM)\nTheir items: black jeans, gray crewneck, grey puma sweatpants, heather grey sweatpants, beige blouse, red beanie\nTheir latest fit check: heather grey sweatpants, beige blouse, red beanie";
 const SINGLE_EXAMPLES: [string, object][] = [
   ["remind me tomorrow at 6pm to return the green jacket", { action: "add_reminder", text: "return the green jacket", days_from_now: 1, time: "18:00" }],
   ["ping me in 2 hours about the boots", { action: "add_reminder", text: "the boots", in_minutes: 120 }],
@@ -154,6 +165,11 @@ const SINGLE_EXAMPLES: [string, object][] = [
     ],
   }],
   ["donated the gray sweater", { action: "remove_item", name: "gray crewneck" }],
+  ["oh no, the heather sweatpants are actually my grey puma ones", { action: "fit_same", name: "heather grey sweatpants", as: "grey puma sweatpants" }],
+  ["that's not a blouse, it's a t-shirt", { action: "fit_relabel", name: "beige blouse", as: "beige t-shirt" }],
+  ["you missed my black watch", { action: "fit_missing", name: "black watch" }],
+  ["oh I'm also wearing my black jeans in that one", { action: "fit_missing", name: "black jeans" }],
+  ["there's no beanie in that pic", { action: "fit_not_there", name: "red beanie" }],
   ["show me my closet", { action: "show_wardrobe" }],
   ["put my winter jacket in the under-bed bin", { action: "set_location", name: "winter jacket", location: "under-bed bin" }],
   ["the gray crewneck is at my mom's", { action: "set_location", name: "gray crewneck", location: "my mom's" }],
@@ -194,6 +210,7 @@ export interface Context {
   now: Date;
   reminders: string[]; // pending reminders, in list order
   items: string[];
+  lastFit?: string[]; // items read from their most recent fit check
 }
 
 // Cap so a confused model can't fire off a pile of actions from one text.
@@ -203,6 +220,7 @@ export async function route(text: string, ctx: Context): Promise<Action[]> {
   const context = [
     `Their reminders: ${ctx.reminders.length ? ctx.reminders.map((r, i) => `${i + 1}. ${r}`).join("; ") : "none"}`,
     `Their items: ${ctx.items.length ? ctx.items.join(", ") : "none"}`,
+    `Their latest fit check: ${ctx.lastFit?.length ? ctx.lastFit.join(", ") : "none"}`,
   ].join("\n");
 
   const res = await postChat(
@@ -462,6 +480,17 @@ function validate(raw: any, now: Date): Action | undefined {
     case "find_item": {
       const name = str(raw.name);
       return name ? { action: "find_item", name } : undefined;
+    }
+    case "fit_same":
+    case "fit_relabel": {
+      const name = str(raw.name);
+      const as = str(raw.as);
+      return name && as ? { action: raw.action, name, as } : undefined;
+    }
+    case "fit_missing":
+    case "fit_not_there": {
+      const name = str(raw.name);
+      return name ? { action: raw.action, name } : undefined;
     }
     case "update_profile": {
       // The model sometimes fills a placeholder ("new location") when they
