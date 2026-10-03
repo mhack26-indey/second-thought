@@ -134,6 +134,7 @@ src/
   ingest.ts         Fit check items → wears or new items
   match.ts          Name grouping, item matching, find by name
   gaps.ts           "What should I buy?"
+  shopping-mode.ts  "Do I have this?": shopping photo vs. fit check, match replies
   store.ts          Database access for the bot
   web.ts            Landing page, wardrobe page, photo serving
   config.ts         Port and public URL
@@ -147,7 +148,8 @@ scripts/            eval-router, extract-test-images, migrate
 
 Against [`PLAN.md`](PLAN.md):
 
-- **Done:** closet intake from fit checks and texts (P0), season tags, "where did I put it?", "what should I buy?" (P1), plus reminders, daily fit checks, the wardrobe page and onboarding.
-- **Next (P0):** "Do I already have this?" in the bot (`matchShoppingPhoto` in `src/closet/shopping.ts` returns the top 3 owned items with reasons and photos; it needs a way to tell a shopping photo from a fit check); order screenshot intake with return deadlines; return nudges ("you haven't worn this yet"); the impact counter.
-- **Later (P2):** season-aware closet ghosts and resale drafts, Nessie transaction detection, secondhand search links, a monthly recap card.
+- **Done:** closet intake from fit checks and texts (P0), "do I already have this?" (P0), season tags, "where did I put it?", "what should I buy?" (P1), secondhand search links when nothing matches (P2), plus reminders, daily fit checks, the wardrobe page and onboarding.
+  - "Do I have this?" (`src/shopping-mode.ts`): texting it (or "shopping", "checking something") makes the next photo within 5 minutes a shopping photo, matched and not saved. Texting it within 2 minutes after a photo takes that fit check back out (the outfit, its wears and the items only it added) and matches the same photo. The reply lists up to 3 owned items with the model's reason and month owned, then the top match's photo; with no match, a Depop search link.
+- **Next (P0):** order screenshot intake with return deadlines; return nudges ("you haven't worn this yet"); the impact counter.
+- **Later (P2):** season-aware closet ghosts and resale drafts, Nessie transaction detection, a monthly recap card.
 - **Not yet:** CLIP embeddings with pgvector. SQL narrows by category and the vision model judges, which is enough for a closet of this size.

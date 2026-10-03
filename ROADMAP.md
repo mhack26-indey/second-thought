@@ -1,6 +1,6 @@
 # Roadmap status
 
-Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 2026, after PR #8.
+Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 2026, after the shopping check was wired in.
 
 **Legend:** ✅ done · 🟡 partly done · ⬜ not started · ✂️ dropped by a plan change
 
@@ -8,19 +8,19 @@ Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 20
 
 | Area | Status |
 |---|---|
-| P0: core (gate: hour 12) | 🟡 1 of 5 done, 1 half built |
+| P0: core (gate: hour 12) | 🟡 2 of 5 done |
 | P1: differentiator | ✅ 3 of 3 |
-| P2: stretch | ⬜ 0 of 4 |
+| P2: stretch | 🟡 1 of 4 |
 | Submission checklist | 🟡 README only |
 
-**The hour 12 gate isn't met.** The plan says to finish P0 before anything else. P1 is already done, so every remaining hour should go to P0: the shopping check, order intake, return nudges and the impact counter. The demo script depends on all four.
+**The hour 12 gate isn't met.** The plan says to finish P0 before anything else. P1 is already done, so every remaining hour should go to P0: order intake, return nudges and the impact counter. The demo script depends on all three.
 
 ## P0: core
 
 | Feature | Status | Notes |
 |---|---|---|
 | **Closet intake** | ✅ | Fit check photos become items (type, color, pattern, fit, season) and log wears; repeat items match instead of duplicating (vision comparison, falling back to name matching). Items can also be added by text. HEIC works. |
-| **"Do I already have this?"** | 🟡 | `matchShoppingPhoto` in `src/closet/shopping.ts` is built and tested but **not wired to the bot**. Every photo is treated as a fit check. Needed: tell a shopping photo apart (e.g. "do I have something like this?" with the photo), reply with the matches and their photos, and don't save it. |
+| **"Do I already have this?"** | ✅ | "do I have this?" (or "shopping", "checking something") makes the next photo within 5 minutes a shopping photo: matched, not saved. Sent within 2 minutes *after* a photo, it takes that fit check back out and matches the same photo. Replies with up to 3 owned items (the model's reason, month owned) and the top match's photo (`src/shopping-mode.ts`). |
 | **Order intake** | ⬜ | The `purchases` and `return_policies` tables exist but nothing writes to them. Needed: parse an order screenshot (vision model), add the item with `source = 'order'`, log retailer, price and return deadline. |
 | **Return nudges** | ⬜ | The reminder scheduler works (one-off reminders, daily fit checks, sent once even across restarts). Missing: a reminder before each return deadline, "you haven't worn this yet" from `wears`, and the "return" reply flow. |
 | **Impact counter** | ⬜ | Nothing tracks purchases avoided or money recovered. Natural sources: a shopping check that found a match (avoided) and a purchase marked returned (recovered). |
@@ -39,7 +39,7 @@ Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 20
 |---|---|---|
 | Season-aware closet ghosts + resale drafts | ⬜ | Needs weather: `outfits.temperature` isn't stored yet. Cities are already real places (Open-Meteo geocoding), so adding the forecast is a small step. |
 | Nessie transaction detection | ⬜ | Decide at hour 12 per the plan; currently out of reach. |
-| Secondhand search links | ⬜ | Fits naturally into the "no match" reply of the shopping check. |
+| Secondhand search links | ✅ | The shopping check's "no match" reply links a Depop search built from the extracted description. |
 | Monthly recap card | ⬜ | |
 
 ## Built beyond the plan
@@ -84,7 +84,7 @@ These weren't features in the plan, but the flows need them:
 |---|---|
 | Hook | ✅ |
 | The closet (pre-loaded weeks of dated fit checks) | ⬜ Needs seed data; the plan suggests a Neon branch to keep it safe |
-| Shopping: photo of black pants → your near-identical pair, still returnable | 🟡 Matching built, bot reply not wired; "still returnable" needs order intake |
+| Shopping: photo of black pants → your near-identical pair, still returnable | 🟡 Match and photo reply work; "still returnable" needs order intake |
 | Returns: order screenshot → "you haven't worn this" → "return" | ⬜ |
 | Worth buying | ✅ (needs the seeded fit checks to say something interesting) |
 | Close on the impact counter | ⬜ |
@@ -104,9 +104,8 @@ These weren't features in the plan, but the flows need them:
 
 ## Suggested next steps, in order
 
-1. **Wire the shopping check into the bot.** A photo with a "do I have…" caption, or one sent right after "do I have this?", runs `matchShoppingPhoto` and replies with the matches. Biggest demo beat, mostly built.
-2. **Order screenshots → purchases.** Extract retailer, item, price and order date; compute the deadline from `return_policies` (fill in ~15 retailers); add the item with `source = 'order'`.
-3. **Return nudges.** A reminder a few days before each deadline, and "hasn't shown up in a fit check" from `wears`; handle the "return" reply.
-4. **Impact counter.** Count shopping checks that found a match, plus returned purchases and their prices; show it in a reply and on the wardrobe page.
-5. **Seed demo data** on a Neon branch: a few weeks of dated fit checks and a couple of orders.
-6. Then the submission checklist; P2 only if time is left.
+1. **Order screenshots → purchases.** Extract retailer, item, price and order date; compute the deadline from `return_policies` (fill in ~15 retailers); add the item with `source = 'order'`.
+2. **Return nudges.** A reminder a few days before each deadline, and "hasn't shown up in a fit check" from `wears`; handle the "return" reply.
+3. **Impact counter.** Count shopping checks that found a match, plus returned purchases and their prices; show it in a reply and on the wardrobe page.
+4. **Seed demo data** on a Neon branch: a few weeks of dated fit checks and a couple of orders.
+5. Then the submission checklist; P2 only if time is left.

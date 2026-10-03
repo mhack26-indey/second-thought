@@ -182,6 +182,18 @@ export async function getPhoto(id: string): Promise<{ image: Uint8Array; mimeTyp
   return row && { image: row.image, mimeType: row.mime_type };
 }
 
+const photoIdOf = (url: string) => url.slice(url.lastIndexOf("/") + 1);
+
+/** A stored photo by the URL photoUrl() gave it. */
+export async function photoAt(url: string): Promise<{ image: Uint8Array; mimeType: string } | undefined> {
+  return getPhoto(photoIdOf(url));
+}
+
+export async function deletePhoto(userId: string, url: string): Promise<void> {
+  const id = photoIdOf(url);
+  if (/^[0-9a-f-]{36}$/i.test(id)) await sql`delete from photos where id = ${id} and user_id = ${userId}`;
+}
+
 /** Saves a fit check photo as today's outfit. */
 export async function addFitCheck(
   userId: string,

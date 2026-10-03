@@ -151,3 +151,29 @@ export async function wearCount(db: Db, itemId: number): Promise<number> {
   );
   return row!.n;
 }
+
+/**
+ * Takes back a fit check: the outfit, its wears, and the items it added
+ * (first seen in it and worn nowhere else). Items it only matched stay, and a
+ * texted item loses the photo it picked up from it. One statement, so it all
+ * goes or none of it does. Returns how many items were deleted.
+ */
+export async function deleteOutfit(db: Db, userId: string, outfitId: number): Promise<number> {
+  const [row] = await db.query<{ removed: number }>(
+    `WITH o AS (SELECT id, photo_url, created_at FROM outfits WHERE id = $2 AND user_id = $1),
+     gone AS (
+       DELETE FROM items i USING o
+       WHERE i.user_id = $1 AND i.source = 'fit_check' AND i.created_at >= o.created_at
+         AND EXISTS (SELECT 1 FROM wears w WHERE w.item_id = i.id AND w.outfit_id = o.id)
+         AND NOT EXISTS (SELECT 1 FROM wears w WHERE w.item_id = i.id AND w.outfit_id <> o.id)
+       RETURNING i.id),
+     unphoto AS (
+       UPDATE items i SET photo_url = NULL FROM o
+       WHERE i.user_id = $1 AND i.source <> 'fit_check' AND i.photo_url = o.photo_url
+       RETURNING i.id),
+     outfit AS (DELETE FROM outfits WHERE id IN (SELECT id FROM o) RETURNING id)
+     SELECT (SELECT count(*) FROM gone)::int AS removed, (SELECT count(*) FROM unphoto)::int, (SELECT count(*) FROM outfit)::int`,
+    [userId, outfitId],
+  );
+  return row!.removed;
+}
