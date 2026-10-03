@@ -101,7 +101,10 @@ for await (const [space, message] of app.messages) {
 
     if (!user) {
       await createUser(message.sender.id);
-      replies = startOnboarding();
+      replies = startOnboarding(
+        message.sender.id,
+        message.content.type === "text" ? message.content.text : undefined,
+      );
     } else if (message.content.type === "text") {
       replies = await handleText(user, message.content.text);
     } else if (message.content.type === "attachment" && message.content.mimeType.startsWith("image/")) {

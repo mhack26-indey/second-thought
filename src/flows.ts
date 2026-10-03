@@ -93,8 +93,18 @@ export function fitCheckPrompt(): string {
   return "Daily fit check: send me a photo of what you're wearing today.";
 }
 
+// A new user's first text is often a real request ("just got black jeans").
+// It waits here until they've answered the city question, then runs.
+// In memory only: a restart mid-onboarding just loses that one text.
+const firstRequests = new Map<string, string>();
+
 /** Replies for a brand-new user: welcome plus the first onboarding question. */
-export function startOnboarding(): string[] {
+export function startOnboarding(userId: string, firstText?: string): string[] {
+  const greeting = firstText !== undefined && fastPath(firstText)?.action === "chat";
+  if (firstText?.trim() && !greeting) {
+    firstRequests.set(userId, firstText);
+    return [WELCOME, `I'll get to that in a sec. ${ASK_CITY}`];
+  }
   return [WELCOME, ASK_CITY];
 }
 
@@ -114,6 +124,7 @@ function fastPath(text: string): Action | undefined {
   const cancel = /^cancel (?:reminder )?#?(\d+)$/.exec(t);
   if (cancel) return { action: "cancel_reminder", number: Number(cancel[1]) };
   if (/^(my )?(profile|info|settings)$/.test(t)) return { action: "show_profile" };
+  if (/^(change|update|set|edit) (my )?(city|location)$/.test(t)) return { action: "update_profile" };
   // Match the original text so the city or name keeps its capitalization.
   const raw = text.trim().replace(/[.!]+$/, "");
   const city = /^(?:(?:set|change|update) )?(?:my )?(?:city|location)(?: to| is)?:? (?!of\b)(.+)$/i.exec(raw);
@@ -135,17 +146,32 @@ const EXACT_COMMANDS = [
   '• "my profile" / "city Detroit" / "my name is Sam"',
 ].join("\n");
 
+/** "I'm in Ann Arbor!" -> "Ann Arbor": the onboarding answer, minus the sentence around it. */
+export function cityFrom(text: string): string {
+  const city = text
+    .trim()
+    .replace(/[.!]+$/, "")
+    .replace(/^(?:(?:i'?m|i am|im|we'?re|we are)\s+)?(?:(?:currently|living|based|located|staying)\s+)?(?:in|at|from)\s+/i, "")
+    .replace(/^(?:i|we)\s+live\s+in\s+/i, "")
+    .replace(/^(?:it'?s|its)\s+/i, "")
+    .trim();
+  return city || text.trim();
+}
+
 /** Handle a text message from a user, returning the replies to send. */
 export async function handleText(user: User, text: string): Promise<string[]> {
   if (user.step === "city") {
-    const city = text.trim();
+    const city = cityFrom(text);
     await updateUser(user.id, { city, step: "done" });
     const hour = user.fitCheckHour;
-    return [
+    const done = [
       `Got it, ${city}. You're all set.`,
       hour === null ? "Daily fit checks are off." : `I'll ask for a fit check every day around ${formatHour(hour)}.`,
-      HELP,
-    ];
+    ].join(" ");
+    const first = firstRequests.get(user.id);
+    if (first === undefined) return [done, HELP];
+    firstRequests.delete(user.id);
+    return [done, ...(await handleText({ ...user, city, step: "done" }, first))];
   }
 
   // Reminder numbers refer to the list as it stood when they texted, so
@@ -274,6 +300,8 @@ async function runAction(user: User, action: Action, listed: Reminder[]): Promis
     }
 
     case "update_profile": {
+      // "change my location" with no city: ask rather than guess.
+      if (!action.name && !action.city) return ['Sure, what city are you in now? Text it like "city Detroit".'];
       const changes: string[] = [];
       if (action.name) {
         user.name = action.name;

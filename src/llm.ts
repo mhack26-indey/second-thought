@@ -72,7 +72,7 @@ Possible actions:
 {"action":"find_item","name":"<the item, as written in their items if it's there>"}   (they ask where something is)
 {"action":"worth_buying"}   (they ask what they should buy, get next, or are missing)
 {"action":"show_profile"}   (their info / profile / settings)
-{"action":"update_profile","city":"<new city, optional>","name":"<what to call them, optional>"}   (they moved, or tell you their name)
+{"action":"update_profile","city":"<new city, optional>","name":"<what to call them, optional>"}   (they moved, or tell you their name; leave city out if they didn't name one)
 {"action":"help"}   (they ask what the bot can do)
 {"action":"chat","kind":"greeting|thanks|style|other"}   (small talk; "style" = any question about how something looks or what to wear)
 
@@ -125,6 +125,7 @@ const SINGLE_EXAMPLES: [string, object][] = [
   ["what am I missing in my closet", { action: "worth_buying" }],
   ["what info do you have on me", { action: "show_profile" }],
   ["I just moved to Chicago", { action: "update_profile", city: "Chicago" }],
+  ["change my city", { action: "update_profile" }],
   ["my name's Sam btw", { action: "update_profile", name: "Sam" }],
   ["call me Jordan", { action: "update_profile", name: "Jordan" }],
   ["is this a good fit?", { action: "chat", kind: "style" }],
@@ -221,6 +222,7 @@ export async function route(text: string, ctx: Context): Promise<Action[]> {
     const action = validate(raw, ctx.now);
     const key = JSON.stringify(action);
     if (!action || seen.has(key)) continue; // drop invalid and duplicate actions
+    if (action.action === "set_location" && !mentions(text, action.location)) continue; // copied from an example
     seen.add(key);
     actions.push(action);
   }
@@ -344,6 +346,15 @@ function toItem(raw: any): ExtractedItem | undefined {
 }
 
 // Small models drift from the schema, so check every field before acting.
+/** True if every word of `phrase` appears in `text` ("under-bed bin" in "put it in the under-bed bin"). */
+function mentions(text: string, phrase: string): boolean {
+  const words = (s: string) => s.toLowerCase().match(/[a-z0-9']+/g) ?? [];
+  const have = new Set(words(text));
+  return words(phrase).every((w) => have.has(w));
+}
+
+const PLACEHOLDER_CITY = /^(?:(?:my|a|the|new|current|unknown|their)\b.*|.*\b(?:location|city|place)\b.*)$/i;
+
 function validate(raw: any, now: Date): Action | undefined {
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : Number(v));
   const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
@@ -381,10 +392,12 @@ function validate(raw: any, now: Date): Action | undefined {
       return name ? { action: "find_item", name } : undefined;
     }
     case "update_profile": {
+      // The model sometimes fills a placeholder ("new location") when they
+      // didn't name a city; with nothing usable, the bot asks for it.
       const city = str(raw.city);
       const name = str(raw.name);
-      if (!city && !name) return undefined;
-      return { action: "update_profile", ...(city && { city }), ...(name && { name }) };
+      const realCity = city && !PLACEHOLDER_CITY.test(city) ? city : undefined;
+      return { action: "update_profile", ...(realCity && { city: realCity }), ...(name && { name }) };
     }
     case "chat":
       return { action: "chat", kind: CHAT_KINDS.includes(raw.kind) ? raw.kind : "other" };

@@ -42,6 +42,8 @@ const cases: [string, string, ((a: any) => boolean)?][] = [
   ["what do you know about me", "show_profile"],
   ["I moved to Seattle last week", "update_profile", (a) => a.city === "Seattle" && !a.name],
   ["can you update my location to Ann Arbor", "update_profile", (a) => a.city === "Ann Arbor"],
+  ["can you change my city", "update_profile", (a) => !a.city && !a.name],
+  ["i moved, update my location", "update_profile", (a) => !a.city],
   ["call me Inesh", "update_profile", (a) => a.name === "Inesh" && !a.city],
   ["call me tomorrow about the jacket return", "add_reminder"],
   ["thanks so much", "chat", (a) => a.kind === "thanks"],
