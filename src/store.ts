@@ -3,6 +3,7 @@ import type { ExtractedItem } from "./closet/extract.ts";
 import { type Item, activeItems, createOutfit, insertItem, setItemStatus } from "./closet/repo.ts";
 import { PUBLIC_URL } from "./config.ts";
 import { type Db, migrate } from "./db/client.ts";
+import { type IngestResult, ingestOutfit } from "./ingest.ts";
 
 // Everything lives in Neon Postgres. The closet tables (items, outfits, wears)
 // belong to the closet module (db/schema.sql, closet/repo.ts); the bot's own
@@ -153,10 +154,24 @@ export async function getPhoto(id: string): Promise<{ image: Uint8Array; mimeTyp
   return row && { image: row.image, mimeType: row.mime_type };
 }
 
-/** Saves a fit check photo as today's outfit. Item extraction hooks in here. */
-export async function addFitCheck(userId: string, image: Buffer, mimeType: string): Promise<void> {
-  const photoId = await addPhoto(userId, image, mimeType);
-  await createOutfit(db, { user_id: userId, taken_on: localDate(), photo_url: photoUrl(photoId) });
+/** Saves a fit check photo as today's outfit. */
+export async function addFitCheck(
+  userId: string,
+  image: Buffer,
+  mimeType: string,
+): Promise<{ id: number; photoUrl: string }> {
+  const url = photoUrl(await addPhoto(userId, image, mimeType));
+  const outfit = await createOutfit(db, { user_id: userId, taken_on: localDate(), photo_url: url });
+  return { id: outfit.id, photoUrl: url };
+}
+
+/** Matches the items seen in a fit check to the closet, adding new ones. */
+export async function ingestFitCheck(
+  userId: string,
+  outfit: { id: number; photoUrl: string },
+  seen: ExtractedItem[],
+): Promise<IngestResult> {
+  return ingestOutfit(db, userId, outfit, seen);
 }
 
 /** Newest first. */

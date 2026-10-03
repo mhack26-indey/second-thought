@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { ITEM_TYPES, type ItemType } from "./closet/categories.ts";
 import { type ExtractedItem, withCategory } from "./closet/extract.ts";
 
@@ -375,4 +376,43 @@ function validate(raw: any, now: Date): Action | undefined {
     default:
       return undefined;
   }
+}
+
+/**
+ * One prompt in, schema-checked JSON out, on the same local model. Used for
+ * text-only judgments (is this the same item?) so they don't spend the
+ * vision model's small daily quota.
+ */
+export async function llmJson<T extends z.ZodType>(schema: T, prompt: string): Promise<z.infer<T>> {
+  const { $schema: _, ...jsonSchema } = z.toJSONSchema(schema);
+  let problem = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await fetch(`${BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {}),
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        temperature: 0,
+        max_tokens: 800,
+        response_format: { type: "json_schema", json_schema: { name: "answer", strict: true, schema: jsonSchema } },
+        messages: [{ role: "user", content: prompt }],
+      }),
+      // Runs in the background after a fit check, so it can take its time; a
+      // first batch of new color names takes ~15s on an M-series Mac.
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) throw new Error(`LLM ${res.status}: ${await res.text()}`);
+    const body = (await res.json()) as { choices: { message: { content: string } }[] };
+    try {
+      const parsed = schema.safeParse(JSON.parse(body.choices[0]?.message.content ?? ""));
+      if (parsed.success) return parsed.data;
+      problem = parsed.error.message;
+    } catch {
+      problem = "invalid JSON";
+    }
+  }
+  throw new Error(`LLM output failed twice: ${problem}`);
 }

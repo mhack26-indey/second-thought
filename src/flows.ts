@@ -1,10 +1,15 @@
 import { type Action, type ChatKind, route } from "./llm.ts";
+import { type ExtractedItem, extractItems } from "./closet/extract.ts";
+import type { ImageInput, MediaType } from "./closet/vlm.ts";
+import { findItemByName } from "./match.ts";
 import {
+  type Item,
   type Reminder,
   type User,
   addFitCheck,
   addReminder,
   addTextItems,
+  ingestFitCheck,
   cancelReminder,
   listItems,
   listOutfits,
@@ -227,9 +232,15 @@ async function runAction(user: User, action: Action, listed: Reminder[]): Promis
           const have = new Set(i.description.toLowerCase().split(/[\s-]+/));
           return words.every((w) => have.has(w));
         });
-      if (!item) return [`I couldn't find "${action.name}" in your wardrobe.`];
-      await removeItem(user.id, item.id);
-      return [`Removed ${item.description}.`];
+      // Different words for the same thing ("gray sweater" for a grey
+      // crewneck) need the model.
+      const found = item ?? (await findItemByName(action.name, items).catch((err) => {
+          console.error("item lookup by name failed", err);
+          return undefined;
+        }));
+      if (!found) return [`I couldn't find "${action.name}" in your wardrobe.`];
+      await removeItem(user.id, found.id);
+      return [`Removed ${found.description}.`];
     }
 
     case "show_profile": {
@@ -279,9 +290,61 @@ const CHAT_REPLIES: Record<ChatKind, string> = {
   other: 'Not sure I can help with that. Text "help" to see what I can do.',
 };
 
-export async function handlePhoto(user: User, image: Buffer, mimeType: string): Promise<string[]> {
-  if (user.step !== "done") return [ASK_CITY];
-  await addFitCheck(user.id, image, mimeType);
+export interface PhotoReply {
+  replies: string[]; // send now
+  later?: () => Promise<string[]>; // slow work (the vision model); send when it's done
+}
+
+const VISION_TYPES = new Set<string>(["image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif"]);
+
+export async function handlePhoto(user: User, image: Buffer, mimeType: string): Promise<PhotoReply> {
+  if (user.step !== "done") return { replies: [ASK_CITY] };
+  const outfit = await addFitCheck(user.id, image, mimeType);
   await updateUser(user.id, { lastFitPhoto: localDate() }); // counts as today's fit check, so no ping
-  return ["Saved your fit check. Auto-detecting the items in it is coming soon."];
+  if (!process.env.GEMINI_API_KEY || !VISION_TYPES.has(mimeType)) return { replies: ["Saved your fit check."] };
+
+  return {
+    replies: ["Saved your fit check. Checking what you're wearing..."],
+    later: () => detectItems(user.id, outfit, { base64: image.toString("base64"), mediaType: mimeType as MediaType }),
+  };
+}
+
+async function detectItems(
+  userId: string,
+  outfit: { id: number; photoUrl: string },
+  image: ImageInput,
+): Promise<string[]> {
+  // The photo is already saved, so a vision failure only costs the item list.
+  let seen: ExtractedItem[];
+  try {
+    seen = await extractItems(image);
+  } catch (err) {
+    console.error(`item extraction failed for outfit ${outfit.id}`, err);
+    return ["I couldn't make out the items in that one, but the photo is saved."];
+  }
+  if (!seen.length) return ["I couldn't spot any clothes in that photo."];
+
+  const { worn, added } = await oneAtATime(userId, () => ingestFitCheck(userId, outfit, seen));
+  const lines: string[] = [];
+  if (worn.length) lines.push(`Wearing: ${worn.map(itemName).join(", ")}.`);
+  if (added.length) lines.push(`New to your closet: ${added.map(itemName).join(", ")}.`);
+  return [lines.join(" ")];
+}
+
+// Two photos sent back to back extract in parallel, but their ingests run in
+// order; otherwise both could add the same new jacket.
+const userQueues = new Map<string, Promise<unknown>>();
+function oneAtATime<T>(userId: string, work: () => Promise<T>): Promise<T> {
+  const run = (userQueues.get(userId) ?? Promise.resolve()).then(work, work);
+  const tail = run.catch(() => {});
+  userQueues.set(userId, tail);
+  void tail.then(() => {
+    if (userQueues.get(userId) === tail) userQueues.delete(userId);
+  });
+  return run;
+}
+
+/** "black jeans"; skips colors a texted item never mentioned. */
+function itemName(item: Item): string {
+  return item.color_primary === "unknown" ? item.type : `${item.color_primary} ${item.type}`;
 }

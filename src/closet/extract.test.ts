@@ -49,5 +49,6 @@ test("toImageInput handles URLs and data URLs", () => {
 test("isSupportedImageFile filters by extension", () => {
   expect(isSupportedImageFile("fit.JPG")).toBe(true);
   expect(isSupportedImageFile(".gitkeep")).toBe(false);
-  expect(isSupportedImageFile("fit.heic")).toBe(false);
+  expect(isSupportedImageFile("fit.heic")).toBe(true);
+  expect(isSupportedImageFile("fit.tiff")).toBe(false);
 });

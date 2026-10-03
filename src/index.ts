@@ -97,6 +97,7 @@ for await (const [space, message] of app.messages) {
   try {
     const user = await getUser(message.sender.id);
     let replies: string[];
+    let later: (() => Promise<string[]>) | undefined;
 
     if (!user) {
       await createUser(message.sender.id);
@@ -104,12 +105,22 @@ for await (const [space, message] of app.messages) {
     } else if (message.content.type === "text") {
       replies = await handleText(user, message.content.text);
     } else if (message.content.type === "attachment" && message.content.mimeType.startsWith("image/")) {
-      replies = await handlePhoto(user, await message.content.read(), message.content.mimeType);
+      ({ replies, later } = await handlePhoto(user, await message.content.read(), message.content.mimeType));
     } else {
       continue;
     }
 
     for (const reply of replies) await space.send(reply);
+
+    // Slow follow-ups (the vision model) run off the loop so other messages
+    // aren't stuck behind them.
+    if (later) {
+      void later()
+        .then(async (followUps) => {
+          for (const reply of followUps) await space.send(reply);
+        })
+        .catch((err) => console.error(`follow-up for message ${message.id} failed`, err));
+    }
   } catch (err) {
     console.error(`failed handling message ${message.id}`, err);
   }
