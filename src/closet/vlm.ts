@@ -81,7 +81,9 @@ export async function loadImage(url: string): Promise<ImageInput> {
 export class VlmError extends Error {}
 
 const MAX_RETRIES = 4;
-const REQUEST_TIMEOUT_MS = 60_000;
+// Vertex comparisons with several photos took up to ~33s in testing; they run
+// in the background after the first reply, so allow plenty of headroom.
+const REQUEST_TIMEOUT_MS = 90_000;
 
 // Rate limits and provider hiccups (429, 5xx) are retried, honoring
 // Retry-After when it's short, else backing off 2s, 4s, 8s, 16s.
@@ -109,8 +111,8 @@ async function postWithBackoff(body: unknown): Promise<any> {
 
 /**
  * Sends images + prompt and returns output validated against `schema`.
- * JSON output is forced via a response schema, temperature is 0 so the same
- * photo gives the same answer, and invalid output is retried once.
+ * JSON output is forced via a response schema, a fixed seed keeps the same
+ * photo giving the same answer where possible, and invalid output is retried once.
  */
 export async function vlmJson<T extends z.ZodType>(opts: {
   schema: T;
@@ -124,14 +126,18 @@ export async function vlmJson<T extends z.ZodType>(opts: {
   const { $schema: _, ...jsonSchema } = z.toJSONSchema(opts.schema);
   const body = {
     model: opts.model ?? MODEL,
-    temperature: 0,
+    // Vertex doesn't take temperature for Gemini here; a fixed seed keeps
+    // answers as repeatable as it allows.
+    seed: 0,
     reasoning: { effort: opts.effort ?? "low" },
     response_format: {
       type: "json_schema",
       json_schema: { name: "answer", strict: true, schema: jsonSchema },
     },
-    // Only route to providers that honor the response schema.
-    provider: { require_parameters: true },
+    // Google Vertex only, priority tier: plain "google-vertex" also allows the
+    // discounted flex tier, which queues requests (15-18s for a small call in
+    // testing) and pushed fit check comparisons toward the 60s timeout.
+    provider: { only: ["google-vertex/global/priority"], require_parameters: true },
     messages: [
       ...(opts.system ? [{ role: "system", content: opts.system }] : []),
       {
