@@ -4,7 +4,7 @@ import { type City, cityFrom, findCities } from "./cities.ts";
 import { exactGroups, findItemByName, llmGroups } from "./match.ts";
 import { addItemToOutfit, deleteFitCheck, itemsOnlyIn, linkItem, mergeItems, relabelItem, unlinkItem } from "./fit-edits.ts";
 import { WINDOW_DAYS, worthBuying } from "./gaps.ts";
-import { type BotReply, type RecentFitCheck, ShoppingMode } from "./shopping-mode.ts";
+import { type BotReply, type RecentFitCheck, ShoppingMode, isShoppingCaption } from "./shopping-mode.ts";
 import { readPhoto } from "./photo-intake.ts";
 import { climateFor } from "./climate.ts";
 import { SNOOZE_DAYS, UNWORN_DAYS, findGhosts, ghostQuestion, markAsked, parseCheckinAnswer, pendingCheckin, setCheckin } from "./ghosts.ts";
@@ -526,14 +526,15 @@ export async function handleTextMessage(user: User, text: string): Promise<BotRe
 
 const VISION_TYPES = new Set<string>(["image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif"]);
 
-export async function handlePhoto(user: User, image: Buffer, mimeType: string): Promise<BotReply> {
+export async function handlePhoto(user: User, image: Buffer, mimeType: string, caption?: string): Promise<BotReply> {
   if (user.paused) await setPaused(user.id, false); // any message: they're back
   if (user.step !== "done") return { replies: [ASK_CITY] };
   const canRead = visionEnabled() && VISION_TYPES.has(mimeType);
   const input: ImageInput = { base64: image.toString("base64"), mediaType: mimeType as MediaType };
 
-  // They asked "do I have this?" first: match the photo, save nothing.
-  if (shopping.takePending(user.id)) {
+  // They asked "do I have this?" first, or in the photo's caption: match the photo, save nothing.
+  const askedInCaption = caption !== undefined && isShoppingCaption(caption);
+  if (shopping.takePending(user.id) || askedInCaption) {
     if (!canRead) return { replies: ["I can't look at that photo right now, so I can't check it against your closet."] };
     return { replies: [], later: () => shopping.match(user.id, input) };
   }

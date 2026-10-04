@@ -35,6 +35,15 @@ const ASKS = [
   /^(?:i'?m |im )?checking (?:something|smth|this|on something)(?: out)?$/,
 ];
 
+// A caption on a photo (Telegram sends them together) asks more loosely than a
+// standalone text: "is this a dupe?", "thinking about getting these".
+const CAPTION_ASK = /\b(?:do i (?:already )?(?:have|own)|already (?:have|own)|dupe|should i (?:buy|get)|thinking (?:of|about) (?:buying|getting)|want to (?:buy|get)|worth (?:buying|it)|shopping|in (?:the )?store)\b/;
+
+/** A photo caption that means "check this against my closet" rather than "log my fit check". */
+export function isShoppingCaption(caption: string): boolean {
+  return isShoppingAsk(caption) || CAPTION_ASK.test(caption.toLowerCase());
+}
+
 export function isShoppingAsk(text: string): boolean {
   const t = text.trim().toLowerCase().replace(/[.!?]+$/, "").replace(/\s+/g, " ");
   return ASKS.some((re) => re.test(t));
@@ -134,7 +143,8 @@ export function shoppingReplies(result: ShoppingResult, now = new Date()): Reply
   if (photo) replies.push({ photo });
   // Then what not buying it saves, for the item type in the shopping photo (an
   // estimate; footprint.ts). A type with no estimate still says how to undo the skip.
-  replies.push(skipLine(result.seen[0]!.type) ?? `I've counted this as skipped; if you buy it anyway, text "I didn't skip it".`);
+  // The kind of thing they'd be buying: what the top match is (a photo can show several items).
+  replies.push(skipLine(result.matches[0]!.type) ?? `I've counted this as skipped; if you buy it anyway, text "I didn't skip it".`);
   return replies;
 }
 

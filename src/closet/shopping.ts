@@ -12,6 +12,7 @@ import type { ImageInput } from "./vlm.ts";
 export interface ShoppingMatch {
   item_id: number;
   description: string;
+  type: string; // the owned item's type, e.g. for what skipping a new one saves
   similarity: Similarity;
   reason: string;
   photo_url: string | null; // the fit check the item was first seen in
@@ -51,6 +52,7 @@ export async function matchShoppingPhoto(
     best.set(item.id, {
       item_id: item.id,
       description: item.description,
+      type: item.type,
       similarity,
       reason,
       photo_url: item.photo_url,
