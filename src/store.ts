@@ -139,6 +139,20 @@ export async function claimFitPing(id: string, today: string): Promise<boolean> 
   return rows.length > 0;
 }
 
+/** Users with a fit check in [from, to) who haven't had this month's recap; claims them. */
+export async function claimRecaps(month: string, from: string, to: string): Promise<string[]> {
+  const rows = await sql`
+    update users u set last_recap = ${month}
+    where u.step = 'done' and u.last_recap is distinct from ${month}
+      and exists (select 1 from outfits o where o.user_id = u.id and o.taken_on >= ${from}::date and o.taken_on < ${to}::date)
+    returning u.id`;
+  return rows.map((r: any) => r.id);
+}
+
+export async function releaseRecap(id: string): Promise<void> {
+  await sql`update users set last_recap = null where id = ${id}`;
+}
+
 export async function releaseFitPing(id: string): Promise<void> {
   await sql`update users set last_fit_ping = null where id = ${id}`;
 }

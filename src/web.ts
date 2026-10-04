@@ -7,6 +7,8 @@ import type { ExtractedItem } from "./closet/extract.ts";
 import { colorIn, itemFromName } from "./llm.ts";
 import { exactGroups, llmGroups, mostAlike, searchItems } from "./match.ts";
 import { aNew, describeKg, footprintOf } from "./footprint.ts";
+import { last30Days } from "./recap.ts";
+import { recapFor } from "./recaps.ts";
 import { money } from "./orders.ts";
 import { type Impact, type ImpactEntry, type LetGo, impactHistory, impactSummary, letGo } from "./impact.ts";
 import {
@@ -33,6 +35,10 @@ import {
 
 export function wardrobeUrl(user: User): string {
   return `${PUBLIC_URL}/w/${user.webToken}`;
+}
+
+export function recapUrl(user: User): string {
+  return `${PUBLIC_URL}/w/${user.webToken}/recap`;
 }
 
 const esc = (s: string) =>
@@ -221,6 +227,7 @@ function page({ user, items: allItems, outfits, reminders: pending, impact, hist
 ${STYLE}</style></head><body>
 <h1>${user.name ? `${esc(user.name)}'s` : "Your"} wardrobe</h1>
 <p class="impact">${impactSummary(impact)}</p>
+<p><a class="edit" href="/w/${user.webToken}/recap">See your 30-day recap →</a></p>
 ${notice ? `<p class="notice">${esc(notice)}</p>` : ""}
 ${
   history.length
@@ -573,6 +580,33 @@ export function startWebServer() {
           // Post/redirect/get so a refresh doesn't resubmit the form.
           return new Response(null, { status: 303, headers: { Location: redirect } });
         },
+      },
+      "/w/:token/recap": async (req) => {
+        const user = await getUserByToken(req.params.token);
+        if (!user) return new Response("Not found", { status: 404 });
+        const { summary } = await recapFor(user.id, last30Days());
+        return html(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recap · Second Thought</title>
+<meta property="og:title" content="My last 30 days on Second Thought"><meta property="og:image" content="${recapUrl(user)}.png">
+<style>
+${STYLE}
+  .recap img { aspect-ratio: auto; border-radius: 16px; box-shadow: 0 8px 30px #0002; }
+  .recap pre { white-space: pre-wrap; font: inherit; color: var(--muted); }
+</style></head><body class="recap">
+<a class="back" href="/w/${user.webToken}">← Wardrobe</a>
+<h1>Your last 30 days</h1>
+<img src="/w/${user.webToken}/recap.png" alt="${esc(summary)}">
+<p><a href="/w/${user.webToken}/recap.png" download="second-thought-recap.png">Download the image</a></p>
+<pre>${esc(summary)}</pre>
+</body></html>`);
+      },
+      "/w/:token/recap.png": async (req) => {
+        const user = await getUserByToken(req.params.token);
+        if (!user) return new Response("Not found", { status: 404 });
+        const { card } = await recapFor(user.id, last30Days());
+        if (!card) return new Response("Couldn't draw the recap", { status: 500 });
+        return new Response(card, { headers: { "Content-Type": "image/png", "Cache-Control": "private, max-age=300" } });
       },
       "/w/:token/let-go": {
         POST: async (req) => {

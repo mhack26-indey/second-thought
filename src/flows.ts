@@ -6,6 +6,8 @@ import { addItemToOutfit, deleteFitCheck, itemsOnlyIn, linkItem, mergeItems, rel
 import { WINDOW_DAYS, worthBuying } from "./gaps.ts";
 import { type BotReply, type RecentFitCheck, ShoppingMode } from "./shopping-mode.ts";
 import { readPhoto } from "./photo-intake.ts";
+import { last30Days } from "./recap.ts";
+import { recapFor } from "./recaps.ts";
 import { handleReturnsText } from "./returns.ts";
 import { type LetGo, impactReply, impactTotals, isImpactAsk, isUnskip, letGo, parseLetGo, undoLastSkip } from "./impact.ts";
 import { describeKg, footprintOf } from "./footprint.ts";
@@ -22,6 +24,7 @@ import {
   deletePhoto,
   latestFitCheck,
   getOutfit,
+  photoAt,
   listItems,
   listOutfits,
   localDate,
@@ -31,7 +34,7 @@ import {
   wornLately,
   updateUser,
 } from "./store.ts";
-import { wardrobeUrl } from "./web.ts";
+import { recapUrl, wardrobeUrl } from "./web.ts";
 
 export const WELCOME =
   "Hey, I'm Second Thought. Text me your fit checks and order screenshots and I'll remember everything you own, so you stop buying duplicates.";
@@ -94,6 +97,7 @@ export const HELP = [
   '• "my reminders" to see your schedule',
   '• "winter jacket is in the under-bed bin", then "where\'s my winter jacket?"',
   '• "what should I buy?" to find the gap in what you wear',
+  '• "my recap" for a card of your last 30 days',
   '• "do I have this?" then a photo, to check before you buy',
   '• "you missed my watch" or "that\'s not a blouse, it\'s a tee" to fix your last fit check',
   '• a screenshot of an order, to track its return window ("check returns" to see what to send back)',
@@ -415,6 +419,10 @@ export async function handleTextMessage(user: User, text: string): Promise<BotRe
     const returns = await handleReturnsText(db, user.id, text, localDate());
     if (returns) return { replies: returns };
     if (isImpactAsk(text)) return { replies: [impactReply(await impactTotals(db, user.id))] };
+    if (RECAP_ASK.test(text.trim().toLowerCase().replace(/[.!?]+$/, ""))) {
+      const { card, summary } = await recapFor(user.id, last30Days());
+      return { replies: [...(card ? [{ image: card, name: "recap.png", mimeType: "image/png" }] : []), summary, `Share it: ${recapUrl(user)}`] };
+    }
     if (isUnskip(text)) {
       const was = await undoLastSkip(db, user.id);
       return {
@@ -469,6 +477,8 @@ export async function handlePhoto(user: User, image: Buffer, mimeType: string): 
 // a restart forgets an unanswered question, and the item simply stays.
 const letGoQuestions = new Map<string, { itemId: number; at: number }>();
 const LET_GO_WINDOW_MS = 30 * 60_000;
+
+const RECAP_ASK = /^(?:my |show me my |send me my |what'?s my )?(?:monthly )?(?:recap|wrap(?:ped)?|month in review)$/;
 
 // "Delete my last fit check" waits for a yes, since it can't be undone.
 const deleteQuestions = new Map<string, { outfitId: number; at: number }>();
