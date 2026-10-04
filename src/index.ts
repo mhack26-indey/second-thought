@@ -258,8 +258,13 @@ for await (const [space, message] of app.messages) {
       let replies: Reply[];
       let later: (() => Promise<Reply[]>) | undefined;
       if (!user) {
-        await createUser(message.sender!.id, message.platform);
-        replies = startOnboarding(message.sender!.id, content.type === "text" ? content.text : undefined);
+        const created = await createUser(message.sender!.id, message.platform);
+        // A first message that's a link code ("link 482913") links right away instead of onboarding.
+        if (content.type === "text" && /^link\s+\d{6}$/i.test(content.text.trim())) {
+          ({ replies, later } = await handleTextMessage(created, content.text));
+        } else {
+          replies = startOnboarding(message.sender!.id, content.type === "text" ? content.text : undefined);
+        }
       } else if (content.type === "text") {
         ({ replies, later } = await handleTextMessage(user, content.text));
       } else if (content.type === "attachment") {

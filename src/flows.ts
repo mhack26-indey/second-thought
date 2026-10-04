@@ -28,6 +28,7 @@ import {
   latestFitCheck,
   getOutfit,
   deleteUserData,
+  mergeUsers,
   setPaused,
   photoAt,
   listItems,
@@ -110,6 +111,7 @@ export const HELP = [
   '• "my impact" to see what you skipped buying and got back',
   '• "fit check at 8am" or "stop fit checks"; "stop" pauses everything until you text again',
   '• "delete my data" to erase everything and start over',
+  '• "link" to move your closet between iMessage and Telegram',
   '• "my profile" to see your info, "city Detroit" or "call me Sam" to change it',
   "Or send a fit check photo.",
 ].join("\n");
@@ -433,6 +435,34 @@ const photoDeps = { db, shop: shopping.match.bind(shopping) };
 const STOP = /^(?:stop|pause|mute|unsubscribe|stop (?:messaging|texting|notifying|bugging) me|stop (?:all )?(?:messages|notifications|texts)|no more (?:messages|notifications|texts))$/;
 const DELETE_ALL = /^(?:please )?(?:delete|erase|wipe|remove|clear) (?:all )?(?:of )?(?:my )?(?:data|account|info|information|everything|stuff|closet and everything)$|^reset (?:me|my account|everything|my data)$|^start over$/;
 
+// Linking accounts (iMessage ↔ Telegram): "link" on the account with the
+// closet gives a 6-digit code; "link <code>" on the other one moves everything
+// there. The code proves both accounts are the same person. In memory, 10 minutes.
+const linkCodes = new Map<string, { userId: string; expires: number }>();
+const LINK_ASK = /^(?:link|link (?:my )?(?:account|closet|accounts)|connect (?:my )?(?:account|closet))$/;
+const LINK_CODE = /^link\s+(\d{6})$/;
+const PLATFORM_NAME: Record<string, string> = { imessage: "iMessage", telegram: "Telegram" };
+
+async function linkAccounts(user: User, t: string): Promise<string | undefined> {
+  const entered = LINK_CODE.exec(t);
+  if (entered) {
+    const code = linkCodes.get(entered[1]!);
+    if (!code || code.expires < Date.now()) return "That code isn't valid (they last 10 minutes). Text \"link\" on your other account for a new one.";
+    if (code.userId === user.id) return "That's this account's own code. Enter it on your other account.";
+    linkCodes.delete(entered[1]!);
+    const moved = await mergeUsers(code.userId, user.id);
+    const here = PLATFORM_NAME[user.platform] ?? user.platform;
+    return `Linked! Your closet (${moved.items} piece${moved.items === 1 ? "" : "s"}, ${moved.fitChecks} fit check${moved.fitChecks === 1 ? "" : "s"}) is here now, and I'll message you on ${here} from now on. Same wardrobe link as before.`;
+  }
+  if (LINK_ASK.test(t)) {
+    for (const [c, v] of linkCodes) if (v.userId === user.id) linkCodes.delete(c); // one live code each
+    const code = String(crypto.getRandomValues(new Uint32Array(1))[0]! % 1_000_000).padStart(6, "0");
+    linkCodes.set(code, { userId: user.id, expires: Date.now() + 10 * 60_000 });
+    return `Your link code is ${code}. On your other account (iMessage or Telegram), text "link ${code}" within 10 minutes, and everything here moves over there.`;
+  }
+  return undefined;
+}
+
 // "delete my data" waits for a yes; anything else cancels it.
 const deleteAllQuestions = new Map<string, number>();
 
@@ -448,6 +478,8 @@ export async function handleTextMessage(user: User, text: string): Promise<BotRe
     }
     if (/^(?:no|nope|nah|cancel|never ?mind|keep it)\b/.test(t)) return { replies: ["Okay, nothing was deleted."] };
   }
+  const linked = await linkAccounts(user, t);
+  if (linked) return { replies: [linked] };
   if (DELETE_ALL.test(t)) {
     deleteAllQuestions.set(user.id, Date.now());
     return {
