@@ -1,5 +1,6 @@
 import { Spectrum, attachment } from "spectrum-ts";
 import { imessage } from "@spectrum-ts/imessage";
+import { telegram } from "@spectrum-ts/telegram";
 import { type Reply, fitCheckPrompt, handlePhoto, handleTextMessage, startOnboarding } from "./flows.ts";
 import { warmUp } from "./llm.ts";
 import {
@@ -16,6 +17,7 @@ import {
   releaseRecap,
   db,
   releaseReminder,
+  setPlatform,
   sql,
 } from "./store.ts";
 import { claimNudges, releaseNudge } from "./returns.ts";
@@ -27,18 +29,34 @@ import { startWebServer } from "./web.ts";
 // Spectrum bridges a single agent loop to many messaging interfaces.
 // Each provider in `providers` adds an interface (terminal TUI, iMessage, …).
 // Docs: https://photon.codes/docs/spectrum-ts
+// Telegram runs alongside iMessage when a bot token is set (from @BotFather).
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN?.trim();
+
 const app = await Spectrum({
   projectId: process.env.PROJECT_ID!,
   projectSecret: process.env.PROJECT_SECRET!,
-  providers: [imessage.config()],
+  providers: [imessage.config(), ...(TELEGRAM_BOT_TOKEN ? [telegram.config({ botToken: TELEGRAM_BOT_TOKEN })] : [])],
 });
 
 const im = imessage(app);
+const tg = TELEGRAM_BOT_TOKEN ? telegram(app) : undefined;
+console.log(`Messaging on iMessage${tg ? " and Telegram" : ""}`);
+
+/**
+ * A conversation with a user, on the platform they use the bot on. Telegram
+ * bots can only message people who've messaged them first, which onboarding
+ * guarantees.
+ */
+async function spaceFor(userId: string) {
+  const user = await getUser(userId);
+  if (user?.platform === "telegram" && tg) return tg.space.create(await tg.user(userId));
+  return im.space.create(await im.user(userId));
+}
 
 // Reminder scheduler: the only thing that messages first. Users have opted in
 // by asking for the reminder, so proactive sends are fine.
 async function sendTo(userId: string, text: string) {
-  const space = await im.space.create(await im.user(userId));
+  const space = await spaceFor(userId);
   await space.send(text);
 }
 
@@ -94,7 +112,7 @@ async function sendMonthlyRecaps() {
   lastRecapDay = today;
   for (const userId of users) {
     try {
-      const space = await im.space.create(await im.user(userId));
+      const space = await spaceFor(userId);
       const { card, summary } = await recapFor(userId, month);
       if (card) await space.send(attachment(Buffer.from(card), { name: "recap.png", mimeType: "image/png" }));
       await space.send(summary);
@@ -212,6 +230,7 @@ for await (const [space, message] of app.messages) {
   const timing: Timing = { inbound: Date.now() - new Date(message.timestamp).getTime(), send: 0 };
   try {
     const user = await getUser(message.sender.id);
+    if (user && user.platform !== message.platform) await setPlatform(user.id, message.platform);
     const content = message.content;
     const isText = content.type === "text";
     const isImage = content.type === "attachment" && content.mimeType.startsWith("image/");
@@ -239,7 +258,7 @@ for await (const [space, message] of app.messages) {
       let replies: Reply[];
       let later: (() => Promise<Reply[]>) | undefined;
       if (!user) {
-        await createUser(message.sender!.id);
+        await createUser(message.sender!.id, message.platform);
         replies = startOnboarding(message.sender!.id, content.type === "text" ? content.text : undefined);
       } else if (content.type === "text") {
         ({ replies, later } = await handleTextMessage(user, content.text));

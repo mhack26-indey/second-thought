@@ -55,6 +55,7 @@ export interface User {
   lastFitPhoto: string | null; // local date of the last photo they sent
   cityOptions: string[] | null; // places to pick from while step is "city_pick"
   paused: boolean; // "stop": the bot starts nothing until they text again
+  platform: string; // "imessage" | "telegram": where the bot's own messages go
 }
 
 export interface Outfit {
@@ -83,6 +84,7 @@ const toUser = (r: any): User => ({
   lastFitPing: r.last_fit_ping,
   lastFitPhoto: r.last_fit_photo,
   paused: r.paused ?? false,
+  platform: r.platform ?? "imessage",
   cityOptions: r.city_options ? JSON.parse(r.city_options) : null,
 });
 
@@ -98,9 +100,9 @@ export async function getUserByToken(token: string): Promise<User | undefined> {
   return row && toUser(row);
 }
 
-export async function createUser(id: string): Promise<User> {
+export async function createUser(id: string, platform = "imessage"): Promise<User> {
   const token = crypto.randomUUID().replaceAll("-", "");
-  await sql`insert into users (id, web_token) values (${id}, ${token}) on conflict (id) do nothing`;
+  await sql`insert into users (id, web_token, platform) values (${id}, ${token}, ${platform}) on conflict (id) do nothing`;
   return (await getUser(id))!;
 }
 
@@ -162,6 +164,10 @@ export async function claimCheckinUsers(today: string): Promise<string[]> {
 }
 
 /** "stop": hold everything the bot would start; any message they send turns it back on. */
+export async function setPlatform(id: string, platform: string): Promise<void> {
+  await sql`update users set platform = ${platform} where id = ${id}`;
+}
+
 export async function setPaused(id: string, paused: boolean): Promise<void> {
   await sql`update users set paused = ${paused} where id = ${id}`;
 }
