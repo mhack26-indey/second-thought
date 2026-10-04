@@ -23,7 +23,24 @@ import { type Profile, buyAdvice, getProfile, saveProfile } from "./profile.ts";
 // - one earlier skipped purchase on a real item, so "my impact" isn't zero
 // Rerunning wipes that user's data first (and only theirs).
 
-export const DEMO_DAYS = 21;
+export const DEMO_DAYS = 150;
+
+/**
+ * Demo photos placed on purpose (filenames in demo_images/): the navy polo
+ * and red puffer, which the shopping and storage demos use, within the last
+ * 3 weeks; the two suits, whose pieces appear nowhere else, the oldest, just
+ * over 90 days back, so "what should I get rid of?" finds them unworn. Not
+ * further: a piece only counts as a closet ghost while fit checks kept coming
+ * (a fit check day a week since it was last worn, ghosts.ts), and these 15
+ * photos make 14 such days, so every other photo has to come after the suits.
+ * The rest spread between them and the last 3 weeks, in order.
+ */
+export const DEMO_PINS = {
+  recent: ["PXL_20260727_222520790.RAW-01.jpg", "PXL_20260727_232949503.RAW-01.jpg", "Screenshot_20261003-184451.png"],
+  old: ["PXL_20260517_003632893.PORTRAIT.jpg", "IMG-20260710-WA0021.jpg"],
+};
+const RECENT_WITHIN = 21;
+const OLD_AT = 90;
 
 /** The demo user's profile (profile.ts): what "what should I buy?" and the links use. */
 export const DEMO_PROFILE: Profile = {
@@ -57,7 +74,7 @@ export function photoDate(file: string): string | null {
  * keep their order, and photos from the same day stay on the same day;
  * undated ones are spaced evenly between them.
  */
-export function scheduleDemoPhotos(files: string[], today: string, days = DEMO_DAYS): DemoPhoto[] {
+export function scheduleDemoPhotos(files: string[], today: string, days = DEMO_DAYS, pins = DEMO_PINS): DemoPhoto[] {
   const dated = files
     .map((file) => ({ file, shotOn: photoDate(file) }))
     .filter((p): p is { file: string; shotOn: string } => p.shotOn !== null)
@@ -77,10 +94,24 @@ export function scheduleDemoPhotos(files: string[], today: string, days = DEMO_D
   let u = 0;
   for (let i = 0; i < total; i++) slots.push(undatedAt.has(i) ? undated[u++]! : sameDay[d++]!);
 
-  return slots.flatMap((group, i) => {
-    const daysAgo = total === 1 ? 1 : Math.round(days - (i * (days - 1)) / (total - 1));
-    return group.map((p) => ({ file: p.file, shotOn: p.shotOn, takenOn: addDays(today, -daysAgo) }));
-  });
+  // Evenly from `from` days ago to `to` days ago, in order.
+  const spread = <T>(groups: T[], from: number, to: number) =>
+    groups.map((g, i) => ({ g, daysAgo: groups.length === 1 ? from : Math.round(from - (i * (from - to)) / (groups.length - 1)) }));
+  const has = (list: string[]) => (group: (typeof slots)[number]) => group.some((p) => list.includes(p.file));
+  const recent = slots.filter(has(pins.recent));
+  const old = slots.filter((g) => !has(pins.recent)(g) && has(pins.old)(g));
+  const rest = slots.filter((g) => !recent.includes(g) && !old.includes(g));
+
+  const placed = !recent.length && !old.length
+    ? spread(slots, days, 1) // not the demo photos: evenly over the range
+    : [
+        ...old.map((g, i) => ({ g, daysAgo: OLD_AT + 2 * (old.length - 1 - i) })),
+        ...spread(rest, OLD_AT - 2, RECENT_WITHIN + 1),
+        ...spread(recent, RECENT_WITHIN - 1, 1),
+      ];
+  return placed
+    .sort((a, b) => b.daysAgo - a.daysAgo)
+    .flatMap(({ g, daysAgo }) => g.map((p) => ({ file: p.file, shotOn: p.shotOn, takenOn: addDays(today, -daysAgo) })));
 }
 
 const JACKET = {

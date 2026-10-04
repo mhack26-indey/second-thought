@@ -5,7 +5,7 @@ import { activeItems, insertItem } from "./closet/repo.ts";
 import type { ImageInput } from "./closet/vlm.ts";
 import type { Db } from "./db/client.ts";
 import { testDb } from "./db/test-db.ts";
-import { DEMO_PROFILE, type DemoOptions, demoReplies, photoDate, scheduleDemoPhotos, seedDemo } from "./demo-seed.ts";
+import { DEMO_PINS, DEMO_PROFILE, type DemoOptions, demoReplies, photoDate, scheduleDemoPhotos, seedDemo } from "./demo-seed.ts";
 import type { Climate } from "./climate.ts";
 import { getProfile } from "./profile.ts";
 import { impactTotals } from "./impact.ts";
@@ -110,7 +110,8 @@ test("the demo user is Inesh, and both recommendations make sense for the seeded
   expect(buy).toContain("You go to the gym, but I don't see athletic shoes in your closet.");
   expect(buy).toContain("Check secondhand first");
   expect(buy).toContain("Secondhand training shoes: https://www.depop.com/search/?q=training%20shoes ·");
-  // Every closet piece was worn in the last three weeks; the never-worn Zara order is the one to send back.
+  // These fixture photos aren't the pinned demo set, so they spread evenly with too few fit checks
+  // to call anything unworn; the never-worn Zara order is the one to send back.
   expect(declutter).toEqual([
     [
       "Here's what you could let go:",
@@ -149,10 +150,11 @@ test("photo dates come from Pixel and WhatsApp names, not screenshots", () => {
   expect(photoDate("P7143138.jpg")).toBeNull();
 });
 
-test("dates are remapped into the last 21 days, in order, with undated photos spread out", () => {
+test("other photos are spread evenly over the range, in order, with undated ones in between", () => {
   const schedule = scheduleDemoPhotos(
     ["IMG-20260801-WA1.jpg", "u2.jpg", "PXL_20250117_1.jpg", "PXL_20260727_b.jpg", "u1.jpg", "PXL_20260727_a.jpg"],
     "2026-10-03",
+    21,
   );
   expect(schedule.map((p) => [p.takenOn, p.file])).toEqual([
     ["2026-09-12", "PXL_20250117_1.jpg"],
@@ -162,4 +164,41 @@ test("dates are remapped into the last 21 days, in order, with undated photos sp
     ["2026-09-27", "u2.jpg"],
     ["2026-10-02", "IMG-20260801-WA1.jpg"],
   ]);
+});
+
+test("the demo photos: suits oldest so their pieces count as unworn, polo and puffer in the last 3 weeks", () => {
+  const files = [
+    "PXL_20250117_222812494.RAW-01.MP.COVER.jpg",
+    "P7143138.jpg",
+    "PXL_20250628_151443062.RAW-01.COVER.jpg",
+    "IMG-20251214-WA00122.jpg",
+    "PXL_20260101_072906701.RAW-02.ORIGINAL.jpg",
+    "Screenshot_20261003-183523.png",
+    "IMG-20260114-WA0005.jpg",
+    "PXL_20260517_003632893.PORTRAIT.jpg",
+    "Screenshot_20261003-184035.png",
+    "IMG-20260710-WA0021.jpg",
+    "PXL_20260727_222520790.RAW-01.jpg",
+    "PXL_20260727_232949503.RAW-01.jpg",
+    "IMG-20260801-WA00082.jpg",
+    "Screenshot_20261003-184451.png",
+    "IMG-20260814-WA00002.jpg",
+  ];
+  const today = "2026-10-04";
+  const schedule = scheduleDemoPhotos(files, today);
+  const ago = (file: string) => Math.round((Date.parse(today) - Date.parse(schedule.find((p) => p.file === file)!.takenOn)) / 86_400_000);
+
+  expect(schedule.slice(0, 2).map((p) => p.file)).toEqual(DEMO_PINS.old); // the oldest two
+  expect(DEMO_PINS.old.map(ago)).toEqual([92, 90]);
+  for (const f of DEMO_PINS.recent) expect(ago(f)).toBeLessThanOrEqual(20);
+  expect(ago(DEMO_PINS.recent[0]!)).toBe(ago(DEMO_PINS.recent[1]!)); // the same-day polo pair stays together
+  // Everything else between, in its original (date) order.
+  const rest = schedule.filter((p) => !DEMO_PINS.old.includes(p.file) && !DEMO_PINS.recent.includes(p.file));
+  expect(rest.every((p) => ago(p.file) <= 88 && ago(p.file) >= 22)).toBe(true);
+  expect(rest.filter((p) => p.shotOn).map((p) => p.shotOn)).toEqual(rest.filter((p) => p.shotOn).map((p) => p.shotOn).sort());
+  // What ghosts.ts needs to call the suits' pieces unworn: a fit check day a week since.
+  for (const suit of DEMO_PINS.old) {
+    const days = new Set(schedule.filter((p) => ago(p.file) < ago(suit)).map((p) => p.takenOn)).size;
+    expect(days).toBeGreaterThanOrEqual(Math.floor(ago(suit) / 7));
+  }
 });

@@ -47,7 +47,7 @@ For whoever tests next. Everything below is on `main`; `bun test` (150 tests), `
 
 ### Known issues found tonight
 - **The bot doesn't log sender IDs,** hence step 2 above.
-- **The seeded closet has one declutter pick.** It was all worn in the last 3 weeks, so "what should I get rid of?" shows only the never-worn Zara jacket, and "Nothing to clear out" once it's returned.
+- **Declutter picks in the seeded closet:** the two suit photos are now dated 90+ days back (everything else after them, the polo and puffer in the last 3 weeks), so "what should I get rid of?" gives the Zara jacket to return plus suit pieces to resell (4 picks in the last run; which suit pieces vary with the vision dedup). The photos span about 92 days, not 150: a piece only counts as unworn while fit checks kept coming, a fit-check day a week, and 15 photos make 14 such days, so nothing can sit further back than the suits. More photos would allow a longer span.
 - **"Do I have this?" now asks "Skip it?" before counting** (#36). Reply "skip" during the demo, or "my impact" won't show the new skip.
 - **Short names use the item type,** so chinos read as "beige pants" in "show my closet" and fit check lists.
 - **A city must be in their words.** One the router's model fills in without it appearing in the text is dropped and asked again ("moved to NYC" read as "New York" gets asked). This guards against cities copied from prompt examples.
