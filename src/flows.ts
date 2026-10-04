@@ -6,6 +6,7 @@ import { addItemToOutfit, deleteFitCheck, itemsOnlyIn, linkItem, mergeItems, rel
 import { WINDOW_DAYS, worthBuying } from "./gaps.ts";
 import { type BotReply, type RecentFitCheck, ShoppingMode, isShoppingCaption } from "./shopping-mode.ts";
 import { readPhoto } from "./photo-intake.ts";
+import { answerFromCloset } from "./ask.ts";
 import { climateFor } from "./climate.ts";
 import { SNOOZE_DAYS, UNWORN_DAYS, findGhosts, ghostQuestion, markAsked, parseCheckinAnswer, pendingCheckin, setCheckin } from "./ghosts.ts";
 import { last30Days } from "./recap.ts";
@@ -27,6 +28,7 @@ import {
   deletePhoto,
   latestFitCheck,
   getOutfit,
+  lastWorn,
   deleteUserData,
   mergeUsers,
   setPaused,
@@ -154,9 +156,13 @@ function fastPath(text: string): Action | undefined {
   // Quantities: "how many white tees do I have", "I have 3 of the gray crewneck". Answered with a
   // link to the page (counts aren't changed by text), so these fixed phrasings skip the model.
   const count =
-    /^how many (?:of )?(?:my |the )?(.+?) do i (?:have|own)$/.exec(t) ??
     /^(?:i |actually i |i actually )(?:have|own) (?:\d+|two|three|four|five|six|seven|eight|nine|ten) (?:of )?(?:the |my |those |these )?(.+?)(?:,? btw| actually)?$/.exec(t);
   if (count) return { action: "item_count", name: count[1]! };
+  const worn =
+    /^when (?:did|have) i (?:last )?(?:wear|wore|worn)(?: my| the)? (.+?)(?: last)?$/.exec(t) ??
+    /^when was the last time i (?:wore|wear)(?: my| the)? (.+)$/.exec(t) ??
+    /^(?:when did i|have i) (?:ever )?worn(?: my| the)? (.+)$/.exec(t);
+  if (worn) return { action: "last_worn", name: worn[1]! };
   if (/^(change|update|set|edit) (my )?(city|location)$/.test(t)) return { action: "update_profile" };
   // Match the original text so the city or name keeps its capitalization.
   const raw = text.trim().replace(/[.!]+$/, "");
@@ -259,6 +265,21 @@ export async function handleText(user: User, text: string): Promise<string[]> {
       return [EXACT_COMMANDS];
     }
   }
+  // A question asks; it never removes, merges, relabels or deletes anything.
+  // ("when did I last wear my pants" once came back as "not in the last photo".)
+  if (isQuestion(text)) {
+    const dropped = actions.filter((a) => CHANGES_THINGS.has(a.action));
+    if (dropped.length) console.warn(`ignored ${dropped.map((a) => a.action).join(", ")} from a question: ${JSON.stringify(text)}`);
+    actions = actions.filter((a) => !CHANGES_THINGS.has(a.action));
+    // Style questions keep the fixed "I don't pick outfits" reply.
+    if (actions.some((a) => a.action === "chat" && a.kind === "style")) return [CHAT_REPLIES.style];
+    // "What should I buy?" only if they asked about buying ("what have I never worn" isn't).
+    if (!/\b(buy|get|purchase|missing|need)\b/i.test(text)) actions = actions.filter((a) => a.action !== "worth_buying");
+    // No specific command answers it: answer from their data (read-only; ask.ts).
+    if (actions.every((a) => a.action === "chat" || a.action === "help")) {
+      return [(await answerFromCloset(db, user.id, text)) ?? QUESTION_HELP];
+    }
+  }
   if (!actions.length) return ["I didn't catch that.", HELP];
 
   const replies: string[] = [];
@@ -346,6 +367,14 @@ async function runAction(user: User, action: Action, listed: Reminder[], text = 
       }
       const since = item.location_set_at ? `, since ${fmtDay(item.location_set_at)}` : "";
       return [`Your ${item.description}: ${item.location}${since}.`];
+    }
+
+    case "last_worn": {
+      const item = await findOwned(user.id, action.name);
+      if (!item) return [`I couldn't find "${action.name}" in your wardrobe.`];
+      const last = await lastWorn(user.id, item.id);
+      if (!last) return [`You haven't worn your ${item.description} in a fit check yet (added ${fmtDay(item.created_at)}).`];
+      return [`You last wore your ${item.description} on ${fmtDay(last.on)}: ${wardrobeUrl(user)}/fit/${last.outfitId}`];
     }
 
     case "item_count": {
@@ -573,6 +602,23 @@ const LET_GO_WINDOW_MS = 30 * 60_000;
 
 const RECAP_ASK = /^(?:my |show me my |send me my |what'?s my )?(?:monthly )?(?:recap|wrap(?:ped)?|month in review)$/;
 
+// Actions that remove or change things: never from a question.
+const CHANGES_THINGS = new Set(["remove_item", "fit_not_there", "fit_same", "fit_relabel", "delete_fit_check", "cancel_reminder", "stop_fit_checks"]);
+// Asking for information, not a polite request ("can you delete…?" stays a request).
+const QUESTION = /^(?:when|what|which|where|why|how|did|do|does|have|has|was|were|is|are|am)\b/;
+const REQUEST = /^(?:can|could|would|will) (?:you|u)\b|^please\b/;
+const isQuestion = (text: string) => {
+  const t = text.trim().toLowerCase();
+  return !REQUEST.test(t) && (QUESTION.test(t) || t.endsWith("?"));
+};
+const QUESTION_HELP = [
+  "I can't answer that one yet. Questions I can answer:",
+  '• "when did I last wear my jeans?"',
+  '• "where\'s my winter jacket?"',
+  '• "how many white tees do I have?"',
+  '• "what should I buy?"',
+].join("\n");
+
 // "Delete my last fit check" waits for a yes, since it can't be undone.
 const deleteQuestions = new Map<string, { outfitId: number; at: number }>();
 const DELETE_WINDOW_MS = 10 * 60_000;
@@ -648,6 +694,8 @@ async function answerCheckin(user: User, text: string): Promise<string | undefin
     return letItGo(user, item, said.how, said.price);
   }
 
+  // "what should I wear to a wedding?" isn't answer 2 ("special occasions"): only a number counts from a question.
+  if (isQuestion(text) && !/^\s*#?[1-6]\b/.test(text)) return undefined;
   switch (parseCheckinAnswer(text)) {
     case 1:
       await setCheckin(db, item.id, { awaiting: null, snoozeDays: SNOOZE_DAYS });
