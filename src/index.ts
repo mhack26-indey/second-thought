@@ -171,15 +171,37 @@ process.on("SIGINT", () => {
     .finally(() => process.exit(0));
 });
 
-// Shows the typing bubble while `work` runs. Unlike space.responding, a
-// failure to start or stop the bubble never stops the reply itself.
-async function withTyping<T>(space: { startTyping(): Promise<void>; stopTyping(): Promise<void> }, work: () => Promise<T>): Promise<T> {
-  await space.startTyping().catch((err) => console.warn("typing indicator failed to start", err));
+// Shows the typing bubble while `work` runs. The bubble is started without
+// waiting for it: on RCS that call can be slow, and the reply shouldn't wait
+// on a cosmetic. A failure to start or stop it never stops the reply.
+async function withTyping<T>(
+  space: { startTyping(): Promise<void>; stopTyping(): Promise<void> },
+  work: () => Promise<T>,
+  timing?: Timing,
+): Promise<T> {
+  const started = Date.now();
+  const typing = space
+    .startTyping()
+    .then(() => timing && (timing.typing = Date.now() - started))
+    .catch((err) => console.warn("typing indicator failed to start", err));
   try {
     return await work();
   } finally {
-    await space.stopTyping().catch(() => {});
+    void typing.then(() => space.stopTyping()).catch(() => {});
   }
+}
+
+// Where a reply's time goes, logged once per message: how late it reached us
+// (the network and platform), the typing bubble call, our own work, and sending.
+interface Timing {
+  inbound: number;
+  typing?: number;
+  work?: number;
+  send: number;
+}
+const secs = (ms: number | undefined) => (ms === undefined ? "?" : `${(ms / 1000).toFixed(1)}s`);
+function logTiming(id: string, t: Timing) {
+  console.log(`[timing] ${id}: reached us after ${secs(t.inbound)}, typing call ${secs(t.typing)}, our work ${secs(t.work)}, sending ${secs(t.send)}`);
 }
 
 // `app.messages` is an async iterable. Each tick yields a `space` (the
@@ -187,6 +209,7 @@ async function withTyping<T>(space: { startTyping(): Promise<void>; stopTyping()
 for await (const [space, message] of app.messages) {
   if (message.direction === "outbound" || !message.sender) continue;
 
+  const timing: Timing = { inbound: Date.now() - new Date(message.timestamp).getTime(), send: 0 };
   try {
     const user = await getUser(message.sender.id);
     const content = message.content;
@@ -198,6 +221,11 @@ for await (const [space, message] of app.messages) {
     // takes a second or two), so a slow answer doesn't look like no answer.
     // A stored photo goes out as an image; a missing one is skipped.
     const send = async (reply: Reply) => {
+      const at = Date.now();
+      await sendReply(reply);
+      timing.send += Date.now() - at;
+    };
+    const sendReply = async (reply: Reply) => {
       if (typeof reply === "string") return void (await space.send(reply));
       if ("image" in reply) return void (await space.send(attachment(Buffer.from(reply.image), { name: reply.name, mimeType: reply.mimeType })));
       const photo = await photoAt(reply.photo);
@@ -206,6 +234,7 @@ for await (const [space, message] of app.messages) {
       await space.send(attachment(Buffer.from(photo.image), { name, mimeType: photo.mimeType }));
     };
 
+    const workStarted = Date.now();
     const later = await withTyping(space, async () => {
       let replies: Reply[];
       let later: (() => Promise<Reply[]>) | undefined;
@@ -219,9 +248,11 @@ for await (const [space, message] of app.messages) {
       } else {
         return undefined;
       }
+      timing.work = Date.now() - workStarted;
       for (const reply of replies) await send(reply);
       return later;
-    });
+    }, timing);
+    logTiming(message.id, timing);
 
     // Slow follow-ups (the vision model) run off the loop so other messages
     // aren't stuck behind them. The bubble comes back while they run, since
