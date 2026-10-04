@@ -86,11 +86,12 @@ test("the same item counts once a day, however often it's checked", async () => 
 
   await shopping(owned.id, morning).match("u1", photo);
   await shopping(owned.id, evening).match("u1", photo); // same day: not again
-  expect(await impactTotals(db, "u1")).toEqual({ skipped: 1, recovered: 0 });
+  expect(await impactTotals(db, "u1")).toMatchObject({ skipped: 1, recovered: 0 });
+  expect((await impactTotals(db, "u1")).co2Kg).toBeCloseTo(16.34); // one pair of jeans (footprint.ts)
 
   await shopping(other.id, evening).match("u1", photo); // a different item that day counts
   await shopping(owned.id, nextDay).match("u1", photo); // and so does the next day
-  expect(await impactTotals(db, "u1")).toEqual({ skipped: 3, recovered: 0 });
+  expect(await impactTotals(db, "u1")).toMatchObject({ skipped: 3, recovered: 0 });
 });
 
 test("money back counts once as a purchase goes returning, then returned", async () => {
@@ -102,25 +103,28 @@ test("money back counts once as a purchase goes returning, then returned", async
 
   await handleReturnsText(db, "u1", "returned it", TODAY);
   expect(await events()).toHaveLength(1);
-  expect(await impactTotals(db, "u1")).toEqual({ skipped: 0, recovered: 49.9 });
+  expect(await impactTotals(db, "u1")).toEqual({ skipped: 0, recovered: 49.9, co2Kg: 0 });
 });
 
 test('"my impact" replies with the totals', async () => {
   expect(impactReply(await impactTotals(db, "u1"))).toBe("Nothing yet. Text 'do I have this?' next time you're shopping.");
 
   // A return only: no closing line, since nothing was skipped.
-  expect(impactReply({ skipped: 0, recovered: 49.9 })).toBe("You've skipped 0 purchases and gotten $49.90 back.");
+  expect(impactReply({ skipped: 0, recovered: 49.9, co2Kg: 0 })).toBe("You've skipped 0 purchases and gotten $49.90 back.");
 
   const owned = await orderedJeans("2026-10-01");
   await shopping(owned.id).match("u1", photo);
   await shopping(owned.id, Date.parse("2026-10-04T11:00:00")).match("u1", photo); // the next day
   const totals = await impactTotals(db, "u1");
-  expect(totals).toEqual({ skipped: 2, recovered: 0 });
+  expect(totals).toMatchObject({ skipped: 2, recovered: 0 });
+  expect(totals.co2Kg).toBeCloseTo(32.68); // two pairs of jeans, estimated
+  // No money back yet, so no "$0.00 back"; the CO₂ line says it's an estimate.
   expect(impactReply(totals)).toBe(
-    "You've skipped 2 purchases and gotten $0.00 back.\nThat's 2 fewer things in your closet you didn't need.",
+    "You've skipped 2 purchases.\nNot making those saved ≈ 33 kg CO₂e (about 82 miles of driving). That's an estimate from Carbonfact's averages per item type.\nThat's 2 fewer things in your closet you didn't need.",
   );
-  expect(impactReply({ skipped: 1, recovered: 0 })).toEndWith("That's 1 fewer thing in your closet you didn't need.");
-  expect(impactSummary(totals)).toBe("Skipped 2 purchases · $0.00 back");
+  expect(impactReply({ skipped: 1, recovered: 0, co2Kg: 0 })).toEndWith("That's 1 fewer thing in your closet you didn't need.");
+  expect(impactSummary(totals)).toBe("Skipped 2 purchases · ≈ 33 kg CO₂e saved");
+  expect(impactSummary({ skipped: 0, recovered: 0, co2Kg: 0 })).toBe("Nothing skipped yet");
 });
 
 test("impact asks", () => {
