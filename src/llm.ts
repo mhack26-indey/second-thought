@@ -95,6 +95,38 @@ export type Action =
   | { action: "help" }
   | { action: "chat"; kind: ChatKind };
 
+/**
+ * Every action the router can return, at runtime (the usage guide checks it
+ * has an entry for each). The compiler fails if this and `Action` disagree.
+ */
+export const ACTION_NAMES = [
+  "add_reminder",
+  "list_reminders",
+  "cancel_reminder",
+  "set_fit_check_time",
+  "stop_fit_checks",
+  "show_wardrobe",
+  "add_items",
+  "remove_item",
+  "set_location",
+  "find_item",
+  "worth_buying",
+  "fit_same",
+  "fit_relabel",
+  "fit_missing",
+  "fit_not_there",
+  "delete_fit_check",
+  "item_count",
+  "last_worn",
+  "show_profile",
+  "update_profile",
+  "help",
+  "chat",
+] as const satisfies readonly Action["action"][];
+type Unlisted = Exclude<Action["action"], (typeof ACTION_NAMES)[number]>;
+const _everyActionListed: [Unlisted] extends [never] ? true : Unlisted = true;
+void _everyActionListed;
+
 export const CHAT_KINDS = ["greeting", "thanks", "style", "other"] as const;
 export type ChatKind = (typeof CHAT_KINDS)[number];
 

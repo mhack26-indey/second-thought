@@ -5,7 +5,8 @@ import { exactGroups, findItemByName, llmGroups } from "./match.ts";
 import { addItemToOutfit, deleteFitCheck, itemsOnlyIn, linkItem, mergeItems, relabelItem, unlinkItem } from "./fit-edits.ts";
 import { WINDOW_DAYS, worthBuying } from "./gaps.ts";
 import { type BotReply, type RecentFitCheck, ShoppingMode, isShoppingCaption } from "./shopping-mode.ts";
-import { readPhoto } from "./photo-intake.ts";
+import { readClosetPhoto, readPhoto } from "./photo-intake.ts";
+import { ClosetMode } from "./closet-mode.ts";
 import { answerFromCloset } from "./ask.ts";
 import { climateFor } from "./climate.ts";
 import { SNOOZE_DAYS, UNWORN_DAYS, findGhosts, ghostQuestion, markAsked, parseCheckinAnswer, pendingCheckin, setCheckin } from "./ghosts.ts";
@@ -21,6 +22,8 @@ import {
   type Reminder,
   type User,
   addFitCheck,
+  addPhoto,
+  photoUrl,
   addReminder,
   addTextItems,
   cancelReminder,
@@ -42,7 +45,8 @@ import {
   wornLately,
   updateUser,
 } from "./store.ts";
-import { recapUrl, wardrobeUrl } from "./web.ts";
+import { guideUrl, recapUrl, wardrobeUrl } from "./web.ts";
+import { helpText, onboardingIntro, wardrobeLinkMessage } from "./guide.ts";
 
 export const WELCOME =
   "Hey, I'm Second Thought. Text me your fit checks and order screenshots and I'll remember everything you own, so you stop buying duplicates.";
@@ -96,27 +100,6 @@ function formatWhen(at: number): string {
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-
-export const HELP = [
-  "You can text me things like:",
-  '• "my wardrobe" to see your closet',
-  '• "I just got black jeans" to add clothes',
-  '• "remind me tomorrow to return the jacket"',
-  '• "my reminders" to see your schedule',
-  '• "winter jacket is in the under-bed bin", then "where\'s my winter jacket?"',
-  '• "what should I buy?" to find the gap in what you wear',
-  '• "my recap" for a card of your last 30 days',
-  '• "check my closet" to find what you haven\'t been wearing',
-  '• "do I have this?" then a photo, to check before you buy',
-  '• "you missed my watch" or "that\'s not a blouse, it\'s a tee" to fix your last fit check',
-  '• a screenshot of an order, to track its return window ("check returns" to see what to send back)',
-  '• "my impact" to see what you skipped buying and got back',
-  '• "fit check at 8am" or "stop fit checks"; "stop" pauses everything until you text again',
-  '• "delete my data" to erase everything and start over',
-  '• "link" to move your closet between iMessage and Telegram',
-  '• "my profile" to see your info, "city Detroit" or "call me Sam" to change it',
-  "Or send a fit check photo.",
-].join("\n");
 
 export function fitCheckPrompt(): string {
   return "Daily fit check: send me a photo of what you're wearing today.";
@@ -220,13 +203,15 @@ async function setCity(user: User, city: string): Promise<string[]> {
 
   const hour = user.fitCheckHour;
   const done = [
-    `Got it, ${city}. You're all set.`,
+    `Got it, ${city}.`,
     hour === null ? "Daily fit checks are off." : `I'll ask for a fit check every day around ${formatHour(hour)}.`,
   ].join(" ");
+  // Then the closet offer, the three-photo loop with the guide link, and the wardrobe page.
+  const finish = [closet.offer(user.id), onboardingIntro(guideUrl(user)), wardrobeLinkMessage(wardrobeUrl(user))];
   const first = firstRequests.get(user.id);
-  if (first === undefined) return [done, HELP];
+  if (first === undefined) return [done, ...finish];
   firstRequests.delete(user.id);
-  return [done, ...(await handleText({ ...user, city, step: "done", cityOptions: null }, first))];
+  return [done, ...(await handleText({ ...user, city, step: "done", cityOptions: null }, first)), ...finish];
 }
 
 /** Handle a text message from a user, returning the replies to send. */
@@ -280,7 +265,7 @@ export async function handleText(user: User, text: string): Promise<string[]> {
       return [(await answerFromCloset(db, user.id, text)) ?? QUESTION_HELP];
     }
   }
-  if (!actions.length) return ["I didn't catch that.", HELP];
+  if (!actions.length) return ["I didn't catch that.", helpText(guideUrl(user))];
 
   const replies: string[] = [];
   for (const action of actions) replies.push(...(await runAction(user, action, listed, text)));
@@ -439,7 +424,7 @@ async function runAction(user: User, action: Action, listed: Reminder[], text = 
     }
 
     case "help":
-      return [HELP];
+      return [helpText(guideUrl(user))];
 
     case "chat":
       return [CHAT_REPLIES[action.kind]];
@@ -459,6 +444,10 @@ export type { BotReply, Reply } from "./shopping-mode.ts";
 
 const shopping = new ShoppingMode({ db });
 const photoDeps = { db, shop: shopping.match.bind(shopping) };
+const closet = new ClosetMode({ db });
+
+/** Closet mode windows whose 10 minutes are up, with the summary to send each (for the scheduler). */
+export const endClosetModes = () => closet.expired();
 
 /** Handle a text message; "do I have this?" may answer later, after the vision model. */
 const STOP = /^(?:stop|pause|mute|unsubscribe|stop (?:messaging|texting|notifying|bugging) me|stop (?:all )?(?:messages|notifications|texts)|no more (?:messages|notifications|texts))$/;
@@ -526,6 +515,9 @@ export async function handleTextMessage(user: User, text: string): Promise<BotRe
   if (user.paused) await setPaused(user.id, false); // any message: they're back
 
   if (user.step === "done") {
+    // "add my closet", or "done" / "skip" while closet mode is open (closet-mode.ts)
+    const closetText = closet.onText(user.id, text);
+    if (closetText) return closetText;
     const checkin = await answerCheckin(user, text);
     if (checkin) return { replies: [checkin] };
     if (CHECK_CLOSET.test(text.trim().toLowerCase().replace(/[.!?]+$/, ""))) {
@@ -570,6 +562,13 @@ export async function handlePhoto(user: User, image: Buffer, mimeType: string, c
     return { replies: [], later: () => shopping.match(user.id, input) };
   }
 
+  // Closet mode: a closet dump whatever the model thinks; no outfit, not today's fit check.
+  if (closet.active(user.id)) {
+    if (!canRead) return { replies: ["I can't look at photos right now, so I couldn't add those. Try again in a bit."] };
+    const url = photoUrl(await addPhoto(user.id, image, mimeType));
+    return { replies: [], later: () => closet.track(user.id, readClosetPhoto(user.id, url, input, photoDeps)) };
+  }
+
   const outfit = await addFitCheck(user.id, image, mimeType);
   const lastFitPhoto = user.lastFitPhoto;
   await updateUser(user.id, { lastFitPhoto: localDate() }); // counts as today's fit check, so no ping
@@ -585,6 +584,7 @@ export async function handlePhoto(user: User, image: Buffer, mimeType: string, c
       await deletePhoto(user.id, outfit.photoUrl);
       await updateUser(user.id, { lastFitPhoto });
     },
+    notToday: () => updateUser(user.id, { lastFitPhoto }),
   };
   shopping.fitCheckSaved(user.id, fit);
   // Saved as a fit check until the vision model says otherwise: an order

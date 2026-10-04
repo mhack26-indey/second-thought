@@ -1,7 +1,7 @@
 import type { Db } from "./db/client.ts";
 import { type AskVision, compareToCloset, pickSameItems } from "./closet/compare.ts";
 import type { ExtractedItem } from "./closet/extract.ts";
-import { type Item, addWear, candidatesByCategory, insertItem } from "./closet/repo.ts";
+import { type Item, type ItemSource, addWear, candidatesByCategory, insertItem } from "./closet/repo.ts";
 import type { ImageInput } from "./closet/vlm.ts";
 import { exactGroups, matchSeenItems, matchWithGroups } from "./match.ts";
 
@@ -43,13 +43,19 @@ export interface IngestResult {
   added: Item[]; // new to the closet
 }
 
-export async function ingestOutfit(
+/**
+ * The shared half of every photo ingest: each seen item either matches an
+ * item the user already owns (which learns any details it was missing) or is
+ * saved as new, with the photo it was seen in.
+ */
+async function saveSeen(
   db: Db,
   userId: string,
-  outfit: { id: number; photoUrl: string },
   seen: ExtractedItem[],
-  matcher: Matcher = matchSeenItems,
-): Promise<IngestResult> {
+  photoUrl: string,
+  source: ItemSource,
+  matcher: Matcher,
+): Promise<{ item: Item; existed: boolean }[]> {
   const categories = [...new Set(seen.map((s) => s.category))];
   const owned = (await Promise.all(categories.map((c) => candidatesByCategory(db, userId, c)))).flat();
 
@@ -62,20 +68,47 @@ export async function ingestOutfit(
   }
 
   const byId = new Map(owned.map((o) => [o.id, o]));
-  const result: IngestResult = { worn: [], added: [] };
+  const saved: { item: Item; existed: boolean }[] = [];
   for (const [index, item] of seen.entries()) {
     const existing = byId.get(matches[index] ?? -1);
-    let saved: Item;
-    if (existing) {
-      saved = await fillFromPhoto(db, existing, item, outfit.photoUrl);
-      result.worn.push(saved);
-    } else {
-      saved = await insertItem(db, { ...item, user_id: userId, source: "fit_check", photo_url: outfit.photoUrl });
-      result.added.push(saved);
-    }
-    await addWear(db, saved.id, outfit.id);
+    saved.push(
+      existing
+        ? { item: await fillFromPhoto(db, existing, item, photoUrl), existed: true }
+        : { item: await insertItem(db, { ...item, user_id: userId, source, photo_url: photoUrl }), existed: false },
+    );
+  }
+  return saved;
+}
+
+/** A fit check: every item seen gets a wear, whether it's new or already owned. */
+export async function ingestOutfit(
+  db: Db,
+  userId: string,
+  outfit: { id: number; photoUrl: string },
+  seen: ExtractedItem[],
+  matcher: Matcher = matchSeenItems,
+): Promise<IngestResult> {
+  const result: IngestResult = { worn: [], added: [] };
+  for (const { item, existed } of await saveSeen(db, userId, seen, outfit.photoUrl, "fit_check", matcher)) {
+    (existed ? result.worn : result.added).push(item);
+    await addWear(db, item.id, outfit.id);
   }
   return result;
+}
+
+/**
+ * A closet dump (a rail, a pile, a drawer): new items are saved with source
+ * 'closet'. Nothing was worn, so no outfit and no wears.
+ */
+export async function ingestCloset(
+  db: Db,
+  userId: string,
+  photoUrl: string,
+  seen: ExtractedItem[],
+  matcher: Matcher = matchSeenItems,
+): Promise<{ had: Item[]; added: Item[] }> {
+  const saved = await saveSeen(db, userId, seen, photoUrl, "closet", matcher);
+  return { had: saved.filter((s) => s.existed).map((s) => s.item), added: saved.filter((s) => !s.existed).map((s) => s.item) };
 }
 
 // A texted item ("just got black jeans") learns its details and gets a photo

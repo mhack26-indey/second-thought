@@ -62,7 +62,8 @@ export interface RecentFitCheck {
   notFitCheck?: boolean; // an order screenshot or product photo, so there's no fit check to take back
   seen?: ExtractedItem[]; // what the fit check read, so the match needn't read it again
   work?: Promise<unknown>; // the fit check's vision work, while it runs
-  cleanup?: () => Promise<void>; // what the closet tables don't hold (the stored photo)
+  cleanup?: () => Promise<void>; // what the closet tables don't hold (the stored photo, today's fit check)
+  notToday?: () => Promise<void>; // just un-count it as today's fit check, keeping the photo
 }
 
 type MatchDeps = NonNullable<Parameters<typeof matchShoppingPhoto>[3]>;

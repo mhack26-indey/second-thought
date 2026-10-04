@@ -8,7 +8,8 @@ Built for MHacks on [Spectrum](https://photon.codes/docs/spectrum-ts) (Photon's 
 
 | You send | The bot |
 |---|---|
-| Your first text | Welcomes you and asks for your city |
+| Your first text | Welcomes you and asks for your city, offers to add your closet from a few photos (or skip), then explains the three-photo loop (fit check, "do I have this?" screenshot, receipt) with a link to the guide, and sends your wardrobe page link |
+| 👕 A photo of your closet rail, a drawer or a pile of clothes | Reads every item and adds the new ones to your closet, with no wears logged: "Added 6 items: navy polo, black jeans, … 2 you already had." "add my closet" (or "closet dump") makes every photo for the next 10 minutes count as one; "done" ends it with "Your closet has 23 items…" |
 | 📸 A fit check photo | Replies right away, then lists what you're wearing: items it already knows get a wear logged, new ones are added to your closet |
 | "do I have this?", then a photo (or the photo, then "do I have this?") | Checks the photo against your closet without saving it: "You already have 1 like this:" with the model's reason, how long you've owned it and whether it's still returnable, then that item's photo. No match: a Depop search link. A product photo sent on its own gets the same check. |
 | 🧾 An order screenshot | Adds each item to your closet and logs the purchase: "Added black jeans from Zara ($49.90). Return window closes Oct 31." Warns if you already own it. |
@@ -23,7 +24,7 @@ Built for MHacks on [Spectrum](https://photon.codes/docs/spectrum-ts) (Photon's 
 | "remind me friday at 5pm to return the jacket" | Sends the reminder at that time |
 | "fit check at 8am" / "stop fit checks" | Moves or turns off the daily fit check prompt |
 | "my wardrobe" | A link to your wardrobe page: items by category, where they're kept, fit check photos, reminders, and an editable profile |
-| "help" | The list of things it understands |
+| "help" | The short list of things it understands, ending with a link to the full guide: every command with an example reply and a Copy button, at `/w/<token>/guide` (a tab next to your closet) and publicly at `/guide` |
 
 One text can carry several requests ("got a black puffer, remind me friday to return the green jacket"). The bot never gives style advice: "what should I wear?" gets a fixed reply saying so.
 
@@ -45,6 +46,7 @@ iMessage ──► Spectrum (Photon) ──► src/index.ts ── message loop 
              runs the actions     src/photo-intake.ts: fit check → ingest + match;
                      │            order screenshot → src/orders.ts;
                      │            product photo → shopping match
+                     │            closet dump → closet items, no wears
                      └────────┬─────────┘
                               ▼
                  Neon Postgres (src/store.ts, src/closet/repo.ts)
@@ -52,7 +54,7 @@ iMessage ──► Spectrum (Photon) ──► src/index.ts ── message loop 
 
 **Two models, both through OpenRouter, each doing what it's good at.**
 
-- **Vision: `google/gemini-3.8-flash`** on Google Vertex's priority tier (`src/closet/vlm.ts`, `src/closet/extract.ts`). One call says what kind of photo it is (fit check, order screenshot or product photo) and turns it into a list of items, each with type (from a fixed list of 42), category, colors, pattern, fit, season and a short description. Output is forced into a JSON schema and validated with zod. HEIC photos straight from an iPhone work.
+- **Vision: `google/gemini-3.8-flash`** on Google Vertex's priority tier (`src/closet/vlm.ts`, `src/closet/extract.ts`). One call says what kind of photo it is (fit check, order screenshot, product photo or closet dump) and turns it into a list of items, each with type (from a fixed list of 42), category, colors, pattern, fit, season and a short description. Output is forced into a JSON schema and validated with zod. HEIC photos straight from an iPhone work.
 - **Text: `meta-llama/llama-3.1-8b-instruct`** (`src/llm.ts`), chosen in PR #8 over Mistral Small, Qwen3 30B and a local qwen2.5:7b for accuracy and speed (about 0.3s per text). Any OpenAI-compatible endpoint works instead, including local Ollama. It turns a free-form text into validated actions, using a prompt with few-shot examples. Exact commands like `my wardrobe` and `help` skip the model entirely. It also handles the naming judgments (below), which are cheap single-word calls that don't need a vision model.
 
 **Matching: is this the item they already own?** (`src/closet/compare.ts`, `src/match.ts`, `src/ingest.ts`)
@@ -119,7 +121,7 @@ What the numbers hide:
 - **Name grouping:** 9 of 9 tricky color and pattern names sorted correctly (charcoal, heather grey, dark blue, khaki, maroon, sage, pinstripe, gingham, logo). The matcher kept a graphic tee, a plain tee, navy jeans and black jeans apart while matching grey with charcoal.
 - **Extraction:** on a real outfit photo sent twice (once as HEIC, once as JPEG), Gemini found the same 6 items both times in about 2s. Two of them came back with drifted names (off-white → beige, plus a second color on the sunglasses), which is why neighboring shades now match.
 - **Vision matching** (10 street-style test photos, 6 of the same person on different days, run end to end on a local database): resending a photo added no duplicates (5 of 5 items, then 8 of 8 on a 54-item closet). The same leather-panel top was recognized across two days although its descriptions differed, and different people's items never merged. A cropped "shopping photo" of camo pants matched the owned pants as `near_identical`, and matched nothing before they were in the closet. On 5 hard cases run 5 times each: 19 of 25 right. The misses: two woven black bags (a flap bag and a tote) merged in 4 of 5 runs, and a resent top in a crowded closet was missed in 2 of 5.
-- **Tests:** 83 unit and database tests (`bun test`, using in-process Postgres via PGlite).
+- **Tests:** 121 unit and database tests (`bun test`, using in-process Postgres via PGlite).
 
 ## Setup
 
@@ -194,7 +196,11 @@ src/
   match.ts          Name grouping, item matching, find by name
   gaps.ts           "What should I buy?"
   shopping-mode.ts  "Do I have this?": shopping photo vs. fit check, match replies
-  photo-intake.ts   Reads a saved photo: fit check ingest, or order screenshot → order intake
+  photo-intake.ts   Reads a saved photo: fit check ingest, closet dump, order screenshot → order intake, product → shopping match
+  closet-mode.ts    "add my closet": 10 minutes of closet dump photos, "done", the onboarding offer
+  guide.ts          The usage guide's content (every command, keyed by router intent), help text, onboarding intro
+  guide-page.ts     The guide as a page: /w/<token>/guide and the public /guide
+  web-style.ts      Shared page styling: design system tokens, icons, tabs
   orders.ts         Order intake: return policies, purchases, closet items, reply
   returns.ts        Return nudges, keep/return/"returned it", "check returns"
   impact.ts         Impact counter: skipped purchases and money back, "my impact"
