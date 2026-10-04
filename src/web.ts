@@ -4,7 +4,7 @@ import { publicGuideResponse, userGuideResponse } from "./guide-page.ts";
 import { climateFor } from "./climate.ts";
 import { type LetGoPick, declutterPicks } from "./declutter.ts";
 import { AGE_RANGES, OCCASIONS, type Occasion, type ProfilePatch, saveProfile } from "./profile.ts";
-import { BOT_NUMBER_DISPLAY, CATEGORY_NAMES, FONTS, PIN, SEASONS, START_LINK, STAT_ICONS, SECTION_TITLES, STYLE, TOKENS, esc, icon, svg, tabs } from "./web-style.ts";
+import { BOT_NUMBER_DISPLAY, CATEGORY_NAMES, FONTS, PIN, SEASONS, START_LINK, STAT_ICONS, SECTION_TITLES, STYLE, TELEGRAM_HANDLE, TELEGRAM_LINK, TOKENS, esc, icon, svg, tabs } from "./web-style.ts";
 import { cityFrom, findCities } from "./cities.ts";
 import { PORT, PUBLIC_URL } from "./config.ts";
 import { addItemToOutfit, deleteFitCheck, itemsOnlyIn, linkItem, mergeItems, unlinkItem } from "./fit-edits.ts";
@@ -535,12 +535,9 @@ const html = (body: string) => new Response(body, { headers: { "Content-Type": "
 // One QR code, encoded once at startup. Transparent background so only the
 // dark modules are drawn; the card behind them supplies the white and the
 // quiet zone is baked in so phone cameras lock on.
-const qrSvg = QRCode.toString(START_LINK, {
-  type: "svg",
-  margin: 4,
-  errorCorrectionLevel: "M",
-  color: { dark: "#111111ff", light: "#00000000" },
-});
+const qrOptions = { type: "svg", margin: 4, errorCorrectionLevel: "M", color: { dark: "#111111ff", light: "#00000000" } } as const;
+const qrSvg = QRCode.toString(START_LINK, qrOptions);
+const telegramQrSvg = QRCode.toString(TELEGRAM_LINK, qrOptions);
 
 async function landingPage(): Promise<string> {
   const feature = (n: string, title: string, body: string, i: number) =>
@@ -578,6 +575,19 @@ ${TOKENS}
   .qr a.code:hover { transform: scale(1.02); }
   .qr svg { display: block; width: 100%; height: auto; }
   .hint { color: var(--mute); font-size: 14px; font-weight: 500; margin: 0; }
+  .ways { display: flex; flex-wrap: wrap; gap: 12px; }
+  .ways .pill { animation: rise .7s var(--ease) .16s both; }
+  .pill-outline { background: transparent; color: var(--canvas); box-shadow: inset 0 0 0 1.5px var(--canvas); }
+  .pill-outline:hover { background: rgba(255,255,255,.12); }
+  /* Messages or Telegram: two radio buttons as a segmented switch; the checked one's code shows. */
+  .switch { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+  .switch input { position: absolute; opacity: 0; pointer-events: none; }
+  .switch label { text-align: center; font-size: 14px; font-weight: 500; padding: 8px 0; cursor: pointer; color: var(--mute);
+    box-shadow: inset 0 -1px 0 var(--hairline); transition: color .2s var(--ease), box-shadow .2s var(--ease); }
+  .switch input:checked + label { color: var(--ink); box-shadow: inset 0 -2px 0 var(--ink); }
+  .switch input:focus-visible + label { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .switch .way { grid-column: 1 / -1; display: none; padding-top: 14px; }
+  #way-sms:checked ~ .way.sms, #way-tg:checked ~ .way.tg { display: block; }
   .hint a { color: var(--ink); white-space: nowrap; }
   .phone { display: none; }
   @media (hover: none) and (pointer: coarse) { .desktop { display: none; } .phone { display: inline; } }
@@ -608,12 +618,25 @@ ${TOKENS}
   <div>
     <h1>Stop buying what you already own.</h1>
     <p class="lede"><b>The closet that texts back.</b> Send fit checks and order screenshots; it remembers everything you own.</p>
-    <a class="pill pill-light" href="${esc(START_LINK)}">Text the bot <span class="arrow" aria-hidden="true">→</span></a>
+    <div class="ways">
+      <a class="pill pill-light" href="${esc(START_LINK)}">Text the bot <span class="arrow" aria-hidden="true">→</span></a>
+      <a class="pill pill-outline" href="${esc(TELEGRAM_LINK)}">Open in Telegram <span class="arrow" aria-hidden="true">→</span></a>
+    </div>
   </div>
   <div class="qr">
     <h2>Scan to start</h2>
-    <a class="code" href="${esc(START_LINK)}" aria-label="Text the bot">${await qrSvg}</a>
-    <p class="hint"><span class="desktop">Scan with your phone camera, or text </span><span class="phone">Tap the code, or text </span><a href="${esc(START_LINK)}">${esc(BOT_NUMBER_DISPLAY)}</a></p>
+    <div class="switch" role="radiogroup" aria-label="How to reach the bot">
+      <input type="radio" name="way" id="way-sms" checked><label for="way-sms">Messages</label>
+      <input type="radio" name="way" id="way-tg"><label for="way-tg">Telegram</label>
+      <div class="way sms">
+        <a class="code" href="${esc(START_LINK)}" aria-label="Text the bot">${await qrSvg}</a>
+        <p class="hint"><span class="desktop">Scan with your phone camera, or text </span><span class="phone">Tap the code, or text </span><a href="${esc(START_LINK)}">${esc(BOT_NUMBER_DISPLAY)}</a></p>
+      </div>
+      <div class="way tg">
+        <a class="code" href="${esc(TELEGRAM_LINK)}" aria-label="Open the bot in Telegram">${await telegramQrSvg}</a>
+        <p class="hint"><span class="desktop">Scan with your phone camera, or open </span><span class="phone">Tap the code, or open </span><a href="${esc(TELEGRAM_LINK)}">${esc(TELEGRAM_HANDLE)}</a></p>
+      </div>
+    </div>
   </div>
 </div></section>
 <section class="section">
@@ -621,9 +644,9 @@ ${TOKENS}
   <ul class="features">
     ${feature("01", "Do I already have this?", "Send a photo of something you&rsquo;re about to buy and get back the near-duplicates already hanging in your closet.", 0)}
     ${feature("02", "Return before the window closes.", "Order screenshots log the deadline, and you get a nudge if you still haven&rsquo;t worn it.", 1)}
-    ${feature("03", "No app to install.", "It all happens in Messages.", 2)}
+    ${feature("03", "No app to install.", "It all happens in Messages or Telegram.", 2)}
   </ul>
-  <div class="more"><a class="pill" href="${esc(START_LINK)}">Text the bot</a><a class="pill pill-soft" href="/guide">See everything you can text it</a></div>
+  <div class="more"><a class="pill" href="${esc(START_LINK)}">Text the bot</a><a class="pill" href="${esc(TELEGRAM_LINK)}">Open in Telegram</a><a class="pill pill-soft" href="/guide">See everything you can text it</a></div>
 </section>
 <footer><span>Second Thought · the closet that texts back</span><span><a href="/guide">Guide</a></span></footer>
 </body></html>`;
