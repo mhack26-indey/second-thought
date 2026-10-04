@@ -316,6 +316,18 @@ export async function latestFitCheck(userId: string): Promise<{ outfit: Outfit; 
   return { outfit: { id: o.id, photoUrl: o.photo_url, at: o.created_at.getTime() }, items };
 }
 
+/** The most recent fit check an item was worn in, if any. */
+export async function lastWorn(userId: string, itemId: number): Promise<{ on: Date; outfitId: number } | undefined> {
+  const [r] = await sql`
+    select o.id, o.taken_on from wears w join outfits o on o.id = w.outfit_id
+    where w.item_id = ${itemId} and o.user_id = ${userId}
+    order by o.taken_on desc, o.id desc limit 1`;
+  if (!r) return undefined;
+  // taken_on is a calendar date (midnight UTC from the driver): keep the day, not the instant.
+  const [y, m, d] = (r.taken_on instanceof Date ? r.taken_on.toISOString() : String(r.taken_on)).slice(0, 10).split("-").map(Number);
+  return { on: new Date(y!, m! - 1, d!), outfitId: r.id };
+}
+
 /** Which items were worn in which fit check: one row per wear. */
 export async function listWears(userId: string): Promise<{ outfitId: number; itemId: number }[]> {
   const rows = await sql`

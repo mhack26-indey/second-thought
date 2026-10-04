@@ -90,6 +90,7 @@ export const GUIDE: GuideSection[] = [
     entries: [
       { intent: "set_location", command: "put my winter jacket in the under-bed bin", does: "Remembers where you keep something." },
       { intent: "find_item", command: "where's my winter jacket?", does: "Tells you where it is.", reply: "Your winter jacket: under-bed bin, since Oct 3." },
+      { intent: "last_worn", command: "when did I last wear my red puffer?", does: "Finds the last fit check it was in, with a link to it.", reply: "You last wore your red quilted puffer jacket on Sep 25: (link)" },
     ],
   },
   {
