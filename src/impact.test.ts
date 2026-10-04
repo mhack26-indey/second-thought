@@ -1,10 +1,10 @@
 import { beforeEach, expect, test } from "bun:test";
 import type { AskVision } from "./closet/compare.ts";
 import type { ExtractedItem } from "./closet/extract.ts";
-import { insertItem } from "./closet/repo.ts";
+import { activeItems, insertItem } from "./closet/repo.ts";
 import type { Db } from "./db/client.ts";
 import { testDb } from "./db/test-db.ts";
-import { impactReply, impactSummary, impactTotals, isImpactAsk } from "./impact.ts";
+import { impactReply, impactSummary, impactTotals, isImpactAsk, isUnskip, letGo, parseLetGo, undoLastSkip } from "./impact.ts";
 import { exactMatcher } from "./ingest.ts";
 import { intakeOrder } from "./orders.ts";
 import { claimNudges, handleReturnsText } from "./returns.ts";
@@ -103,14 +103,16 @@ test("money back counts once as a purchase goes returning, then returned", async
 
   await handleReturnsText(db, "u1", "returned it", TODAY);
   expect(await events()).toHaveLength(1);
-  expect(await impactTotals(db, "u1")).toEqual({ skipped: 0, recovered: 49.9, co2Kg: 0 });
+  expect(await impactTotals(db, "u1")).toMatchObject({ skipped: 0, returned: 1, recovered: 49.9 });
+  expect((await impactTotals(db, "u1")).co2Kg).toBeCloseTo(16.34); // the returned jeans get worn again, est.
 });
 
 test('"my impact" replies with the totals', async () => {
   expect(impactReply(await impactTotals(db, "u1"))).toBe("Nothing yet. Text 'do I have this?' next time you're shopping.");
 
   // A return only: no closing line, since nothing was skipped.
-  expect(impactReply({ skipped: 0, recovered: 49.9, co2Kg: 0 })).toBe("You've skipped 0 purchases and gotten $49.90 back.");
+  const none = { skipped: 0, returned: 0, sold: 0, donated: 0, recovered: 0, co2Kg: 0 };
+  expect(impactReply({ ...none, returned: 1, recovered: 49.9 })).toBe("You've returned 1 item, and gotten $49.90 back.");
 
   const owned = await orderedJeans("2026-10-01");
   await shopping(owned.id).match("u1", photo);
@@ -120,14 +122,66 @@ test('"my impact" replies with the totals', async () => {
   expect(totals.co2Kg).toBeCloseTo(32.68); // two pairs of jeans, estimated
   // No money back yet, so no "$0.00 back"; the CO₂ line says it's an estimate.
   expect(impactReply(totals)).toBe(
-    "You've skipped 2 purchases.\nNot making those saved ≈ 33 kg CO₂e (about 82 miles of driving). That's an estimate from Carbonfact's averages per item type.\nThat's 2 fewer things in your closet you didn't need.",
+    "You've skipped 2 purchases.\nThat saved ≈ 33 kg CO₂e (about 82 miles of driving). That's an estimate from Carbonfact's averages per item type.\nThat's 2 fewer things in your closet you didn't need.",
   );
-  expect(impactReply({ skipped: 1, recovered: 0, co2Kg: 0 })).toEndWith("That's 1 fewer thing in your closet you didn't need.");
+  expect(impactReply({ ...none, skipped: 1 })).toEndWith("That's 1 fewer thing in your closet you didn't need.");
   expect(impactSummary(totals)).toBe("Skipped 2 purchases · ≈ 33 kg CO₂e saved");
-  expect(impactSummary({ skipped: 0, recovered: 0, co2Kg: 0 })).toBe("Nothing skipped yet");
+  expect(impactSummary(none)).toBe("Nothing skipped yet");
+  expect(impactSummary({ ...none, skipped: 1, sold: 1, donated: 1, recovered: 20, co2Kg: 40.2 })).toBe(
+    "Skipped 1 purchase · Sold 1 · Donated 1 · ≈ 40 kg CO₂e saved · $20.00 back",
+  );
 });
 
 test("impact asks", () => {
   for (const ask of ["my impact", "Impact", "my stats", "How am I doing?", "what's my impact"]) expect(isImpactAsk(ask)).toBe(true);
   for (const other of ["how am I doing on returns", "my wardrobe", "stats on my jeans"]) expect(isImpactAsk(other)).toBe(false);
+});
+
+test("letting go: sold and donated count once, thrown away counts nothing", async () => {
+  const sold = await insertItem(db, { ...jeans, user_id: "u1", source: "fit_check" });
+  const given = await insertItem(db, { ...jeans, user_id: "u1", source: "fit_check" });
+  const trashed = await insertItem(db, { ...jeans, user_id: "u1", source: "fit_check" });
+
+  expect(await letGo(db, "u1", sold.id, "sold", 25)).toBe(true);
+  expect(await letGo(db, "u1", sold.id, "sold", 25)).toBe(false); // already gone
+  expect(await letGo(db, "u2", given.id, "donated")).toBe(false); // not theirs
+  expect(await letGo(db, "u1", given.id, "donated")).toBe(true);
+  expect(await letGo(db, "u1", trashed.id, "trashed")).toBe(true);
+
+  const totals = await impactTotals(db, "u1");
+  expect(totals).toMatchObject({ sold: 1, donated: 1, recovered: 25 });
+  expect(totals.co2Kg).toBeCloseTo(2 * 16.34); // not the trashed pair
+  expect(await activeItems(db, "u1")).toHaveLength(0);
+});
+
+test("returning an ordered item marks the order returned and counts its price once", async () => {
+  const owned = await orderedJeans("2026-10-01");
+  expect(await letGo(db, "u1", owned.id, "returned")).toBe(true);
+  const [p] = await db.query<{ status: string }>(`SELECT status FROM purchases`);
+  expect(p!.status).toBe("returned");
+  expect(await impactTotals(db, "u1")).toMatchObject({ returned: 1, recovered: 49.9 });
+});
+
+test('"I didn\'t skip it" takes back the latest skip', async () => {
+  const owned = await orderedJeans("2026-10-01");
+  await shopping(owned.id).match("u1", photo);
+  expect((await impactTotals(db, "u1")).skipped).toBe(1);
+  expect(await undoLastSkip(db, "u1")).toBe(owned.description);
+  expect((await impactTotals(db, "u1")).skipped).toBe(0);
+  expect(await undoLastSkip(db, "u1")).toBeUndefined();
+
+  for (const t of ["I didn't skip it", "didnt skip it", "oops I didn't skip that one", "bought it anyway", "I did not skip it, I bought it"]) {
+    expect(isUnskip(t)).toBe(true);
+  }
+  expect(isUnskip("did I skip anything")).toBe(false);
+});
+
+test("how an item left, from a reply", () => {
+  expect(parseLetGo("sold it for $20")).toEqual({ how: "sold", price: 20 });
+  expect(parseLetGo("sold on depop")).toEqual({ how: "sold", price: null });
+  expect(parseLetGo("gave it away to my brother")).toEqual({ how: "donated", price: null });
+  expect(parseLetGo("goodwill")).toEqual({ how: "donated", price: null });
+  expect(parseLetGo("I returned it")).toEqual({ how: "returned", price: null });
+  expect(parseLetGo("tossed it, it ripped")).toEqual({ how: "trashed", price: null });
+  expect(parseLetGo("remind me tomorrow")).toBeUndefined();
 });

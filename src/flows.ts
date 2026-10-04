@@ -7,7 +7,9 @@ import { WINDOW_DAYS, worthBuying } from "./gaps.ts";
 import { type BotReply, type RecentFitCheck, ShoppingMode } from "./shopping-mode.ts";
 import { readPhoto } from "./photo-intake.ts";
 import { handleReturnsText } from "./returns.ts";
-import { impactReply, impactTotals, isImpactAsk } from "./impact.ts";
+import { type LetGo, impactReply, impactTotals, isImpactAsk, isUnskip, letGo, parseLetGo, undoLastSkip } from "./impact.ts";
+import { describeKg, footprintOf } from "./footprint.ts";
+import { money } from "./orders.ts";
 import {
   type Item,
   type Reminder,
@@ -240,12 +242,12 @@ export async function handleText(user: User, text: string): Promise<string[]> {
   if (!actions.length) return ["I didn't catch that.", HELP];
 
   const replies: string[] = [];
-  for (const action of actions) replies.push(...(await runAction(user, action, listed)));
+  for (const action of actions) replies.push(...(await runAction(user, action, listed, text)));
   // Several actions answer in one message instead of a burst of texts.
   return actions.length > 1 ? [replies.join("\n")] : replies;
 }
 
-async function runAction(user: User, action: Action, listed: Reminder[]): Promise<string[]> {
+async function runAction(user: User, action: Action, listed: Reminder[], text = ""): Promise<string[]> {
   switch (action.action) {
     case "add_reminder": {
       await addReminder(user.id, action.at, action.text);
@@ -297,8 +299,15 @@ async function runAction(user: User, action: Action, listed: Reminder[]): Promis
     case "remove_item": {
       const item = await findOwned(user.id, action.name);
       if (!item) return [`I couldn't find "${action.name}" in your wardrobe.`];
-      await removeItem(user.id, item.id);
-      return [`Removed ${item.description}.`];
+      // How it left decides what counts, so ask unless they said. The model
+      // sometimes leaves "how" out of "gave away" or "returned"; the words decide then.
+      const said = action.how ? { how: action.how, price: action.price ?? null } : parseLetGo(text);
+      if (!said) {
+        letGoQuestions.set(user.id, { itemId: item.id, at: Date.now() });
+        const options = item.purchase_id ? "returned, sold, donated, or threw it away" : "sold, donated, or threw it away";
+        return [`How did your ${item.description} go: ${options}? (Add the price if you sold it.)`];
+      }
+      return [await letItGo(user, item, said.how, said.price)];
     }
 
     case "set_location": {
@@ -387,10 +396,18 @@ const photoDeps = { db, shop: shopping.match.bind(shopping) };
 /** Handle a text message; "do I have this?" may answer later, after the vision model. */
 export async function handleTextMessage(user: User, text: string): Promise<BotReply> {
   if (user.step === "done") {
+    const letGoAnswer = await answerLetGo(user, text);
+    if (letGoAnswer) return { replies: [letGoAnswer] };
     // "keep" / "return" after a nudge, "returned it", "check returns" (returns.ts)
     const returns = await handleReturnsText(db, user.id, text, localDate());
     if (returns) return { replies: returns };
     if (isImpactAsk(text)) return { replies: [impactReply(await impactTotals(db, user.id))] };
+    if (isUnskip(text)) {
+      const was = await undoLastSkip(db, user.id);
+      return {
+        replies: [was ? `Got it, I took that off your skipped count (it matched your ${was}).` : "There's no recent skip to take back."],
+      };
+    }
     const shop = shopping.onText(user.id, text);
     if (shop) return shop;
   }
@@ -433,6 +450,36 @@ export async function handlePhoto(user: User, image: Buffer, mimeType: string): 
     replies: ["Got it, taking a look..."],
     later: () => (fit.work = readPhoto(user.id, outfit, input, fit, photoDeps)),
   };
+}
+
+// "Got rid of the crewneck" waits for how it went before it counts. In memory:
+// a restart forgets an unanswered question, and the item simply stays.
+const letGoQuestions = new Map<string, { itemId: number; at: number }>();
+const LET_GO_WINDOW_MS = 30 * 60_000;
+
+/** Their answer to "how did it go?", if one is waiting. */
+async function answerLetGo(user: User, text: string): Promise<string | undefined> {
+  const waiting = letGoQuestions.get(user.id);
+  if (!waiting || Date.now() - waiting.at > LET_GO_WINDOW_MS) return undefined;
+  const answer = parseLetGo(text);
+  if (!answer) return undefined; // something else: leave the question open
+  letGoQuestions.delete(user.id);
+  const item = (await listItems(user.id)).find((i) => i.id === waiting.itemId);
+  if (!item) return "That item's already gone from your wardrobe.";
+  return letItGo(user, item, answer.how, answer.price);
+}
+
+async function letItGo(user: User, item: Item, how: LetGo, price: number | null): Promise<string> {
+  if (!(await letGo(db, user.id, item.id, how, price))) return `Couldn't update your ${item.description}.`;
+  const kg = footprintOf(item.type);
+  const saved = how !== "trashed" && kg !== null ? ` Someone else wearing it saves ${describeKg(kg)} (estimate).` : "";
+  const done = {
+    returned: `Marked your ${item.description} as returned.`,
+    sold: `Nice, sold your ${item.description}${price ? ` for ${money(price)}` : ""}.`,
+    donated: `Donated your ${item.description}. Good call.`,
+    trashed: `Removed your ${item.description}.`,
+  }[how];
+  return done + saved;
 }
 
 type Correction = Extract<Action, { action: "fit_same" | "fit_relabel" | "fit_missing" | "fit_not_there" }>;

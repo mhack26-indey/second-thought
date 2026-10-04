@@ -80,6 +80,12 @@ create table if not exists impact_events (
 );
 create index if not exists impact_events_user on impact_events (user_id);
 create unique index if not exists impact_events_recovered_once on impact_events (purchase_id) where kind = 'recovered';
+-- 'sold' / 'donated': they let an item go so someone else wears it (amount =
+-- what they sold it for, if they said), once per item. Added after the table
+-- existed, so the check is replaced. Thrown away counts nothing.
+alter table impact_events drop constraint if exists impact_events_kind_check;
+alter table impact_events add constraint impact_events_kind_check check (kind in ('avoided', 'recovered', 'sold', 'donated'));
+create unique index if not exists impact_events_let_go_once on impact_events (item_id) where kind in ('sold', 'donated');
 
 -- Return windows for retailers students use most, in days from the order
 -- date. Standard online policy as of Oct 2026. Replies tell people to verify

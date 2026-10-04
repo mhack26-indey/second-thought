@@ -3,9 +3,12 @@ import { describeKg, footprintOf } from "./footprint.ts";
 import { money } from "./orders.ts";
 
 // The impact counter: purchases skipped because a shopping check found
-// something they already own, and money back from returns. Counts and money
-// are what actually happened; the CO₂ is an estimate per item type
-// (footprint.ts, Carbonfact category averages) and is always labeled as one.
+// something they already own, items returned, and items sold or donated, with
+// the money back from returns and sales. Thrown away counts nothing. Counts and money are what actually happened.
+// The CO₂ is an estimate per item type (footprint.ts, Carbonfact category
+// averages), always labeled as one: for a skip, the new item that wasn't
+// made; for a return, sale or donation, the new item someone else doesn't need
+// to buy when this one is worn again.
 
 /**
  * A shopping check matched `itemId`; the amount is that item's order price,
@@ -43,37 +46,114 @@ export async function recordRecovered(db: Db, purchaseId: string): Promise<void>
 
 export interface Impact {
   skipped: number; // shopping checks that found a match
-  recovered: number; // dollars back from returns
-  co2Kg: number; // estimated, for skipped purchases of item types with a known footprint
+  returned: number; // purchases sent back
+  sold: number; // items sold
+  donated: number; // items donated
+  recovered: number; // dollars back from returns and sales
+  co2Kg: number; // estimated, for item types with a known footprint
 }
 
-/** One skipped purchase, for "Here's what you skipped". */
-export interface Skipped {
+export type ImpactKind = "avoided" | "recovered" | "sold" | "donated";
+
+/** One counted event, for the wardrobe page's list. */
+export interface ImpactEntry {
+  kind: ImpactKind;
   at: Date;
-  description: string; // the owned item the shopping check matched
+  description: string; // the item: for a skip, the owned item it matched
   type: string;
+  amount: number | null;
   co2Kg: number | null;
 }
 
-export async function skippedPurchases(db: Db, userId: string): Promise<Skipped[]> {
-  const rows = await db.query<{ created_at: Date; description: string; type: string }>(
-    `SELECT e.created_at, i.description, i.type
+export async function impactHistory(db: Db, userId: string): Promise<ImpactEntry[]> {
+  const rows = await db.query<{ kind: ImpactKind; created_at: Date; description: string; type: string; amount: string | null }>(
+    `SELECT e.kind, e.created_at, i.description, i.type, e.amount::text AS amount
      FROM impact_events e JOIN items i ON i.id = e.item_id
-     WHERE e.user_id = $1 AND e.kind = 'avoided' ORDER BY e.created_at DESC`,
+     WHERE e.user_id = $1 ORDER BY e.created_at DESC`,
     [userId],
   );
-  return rows.map((r) => ({ at: r.created_at, description: r.description, type: r.type, co2Kg: footprintOf(r.type) }));
+  return rows.map((r) => ({
+    kind: r.kind,
+    at: r.created_at,
+    description: r.description,
+    type: r.type,
+    amount: r.amount === null ? null : Number(r.amount),
+    co2Kg: footprintOf(r.type),
+  }));
 }
 
 export async function impactTotals(db: Db, userId: string): Promise<Impact> {
-  const [row] = await db.query<{ skipped: number; recovered: string }>(
-    `SELECT count(*) FILTER (WHERE kind = 'avoided')::int AS skipped,
-       coalesce(sum(amount) FILTER (WHERE kind = 'recovered'), 0)::text AS recovered
-     FROM impact_events WHERE user_id = $1`,
+  const history = await impactHistory(db, userId);
+  const count = (kind: ImpactKind) => history.filter((h) => h.kind === kind).length;
+  return {
+    skipped: count("avoided"),
+    returned: count("recovered"),
+    sold: count("sold"),
+    donated: count("donated"),
+    recovered: history.filter((h) => h.kind !== "avoided").reduce((sum, h) => sum + (h.amount ?? 0), 0),
+    co2Kg: history.reduce((sum, h) => sum + (h.co2Kg ?? 0), 0),
+  };
+}
+
+export type LetGo = "returned" | "sold" | "donated" | "trashed";
+
+/**
+ * They let an item go. Returned marks its order returned (money back, once);
+ * sold or donated counts once per item; thrown away just leaves the closet.
+ * False if the item isn't theirs or is already gone.
+ */
+export async function letGo(db: Db, userId: string, itemId: number, how: LetGo, price: number | null = null): Promise<boolean> {
+  const [item] = await db.query<{ purchase_id: string | null }>(
+    `UPDATE items SET status = $3 WHERE id = $2 AND user_id = $1 AND status = 'active' RETURNING purchase_id`,
+    [userId, itemId, how === "returned" ? "returned" : "removed"],
+  );
+  if (!item) return false;
+  if (how === "returned" && item.purchase_id) {
+    await db.query(`UPDATE purchases SET status = 'returned' WHERE id::text = $1 AND user_id = $2`, [item.purchase_id, userId]);
+    await recordRecovered(db, item.purchase_id);
+  } else if (how === "sold" || how === "donated") {
+    await db.query(
+      `INSERT INTO impact_events (user_id, kind, amount, item_id) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (item_id) WHERE kind IN ('sold', 'donated') DO NOTHING`,
+      [userId, how, how === "sold" ? price : null, itemId],
+    );
+  }
+  return true;
+}
+
+/** "sold it for $20", "donated", "tossed it" -> how and the price, if any. */
+export function parseLetGo(text: string): { how: LetGo; price: number | null } | undefined {
+  const t = text.toLowerCase();
+  const price = Number(/\$?\s*(\d+(?:\.\d{1,2})?)/.exec(t)?.[1]) || null;
+  if (/\b(sold|sell|depop|poshmark|ebay|vinted)\b/.test(t)) return { how: "sold", price };
+  if (/\b(donat\w*|gave (?:it )?away|goodwill|thrift|gave it to)\b/.test(t)) return { how: "donated", price: null };
+  if (/\b(return\w*|sent (?:it )?back)\b/.test(t)) return { how: "returned", price: null };
+  if (/\b(threw|throw|thrown|trash\w*|toss\w*|garbage|binned|bin|ripped|broke|worn out)\b/.test(t)) return { how: "trashed", price: null };
+  return undefined;
+}
+
+/**
+ * A shopping match counts as skipped right away, but they may buy it anyway:
+ * "I didn't skip it" takes back the latest skip from the last week.
+ * Returns what it matched, or undefined if there was nothing to take back.
+ */
+export async function undoLastSkip(db: Db, userId: string): Promise<string | undefined> {
+  const [row] = await db.query<{ description: string }>(
+    `WITH last AS (
+       SELECT id, item_id FROM impact_events
+       WHERE user_id = $1 AND kind = 'avoided' AND created_at > now() - interval '7 days'
+       ORDER BY created_at DESC LIMIT 1),
+     gone AS (DELETE FROM impact_events e USING last WHERE e.id = last.id RETURNING last.item_id)
+     SELECT i.description FROM gone JOIN items i ON i.id = gone.item_id`,
     [userId],
   );
-  const co2Kg = (await skippedPurchases(db, userId)).reduce((sum, s) => sum + (s.co2Kg ?? 0), 0);
-  return { skipped: row!.skipped, recovered: Number(row!.recovered), co2Kg };
+  return row?.description;
+}
+
+const UNSKIP = /^(?:(?:oh|oops|nah|actually|lol),? )?(?:i )?(?:didn'?t|did not|didnt) skip(?: it| that(?: one)?)?(?:,? i bought it)?$|^(?:i )?(?:bought|got) it anyway$/;
+
+export function isUnskip(text: string): boolean {
+  return UNSKIP.test(text.trim().toLowerCase().replace(/[.!?]+$/, "").replace(/\s+/g, " "));
 }
 
 const IMPACT_ASK = /^(?:what'?s |show )?(?:my )?(?:impact|stats)$|^how am i doing$/;
@@ -84,23 +164,31 @@ export function isImpactAsk(text: string): boolean {
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-/** "Skipped 2 purchases · ≈ 35 kg CO₂e saved · $49.90 back" for the wardrobe page; zeros are left out. */
-export function impactSummary({ skipped, recovered, co2Kg }: Impact): string {
-  if (skipped === 0 && recovered === 0) return "Nothing skipped yet";
-  const parts = [`Skipped ${plural(skipped, "purchase", "purchases")}`];
-  if (co2Kg > 0) parts.push(`≈ ${Math.round(co2Kg)} kg CO₂e saved`);
-  if (recovered > 0) parts.push(`${money(recovered)} back`);
+/** "Skipped 2 · Sold 1 · ≈ 50 kg CO₂e saved · $40.00 back" for the wardrobe page; zeros are left out. */
+export function impactSummary({ skipped, returned, sold, donated, recovered, co2Kg }: Impact): string {
+  if (skipped + returned + sold + donated === 0) return "Nothing skipped yet";
+  const parts = [
+    skipped && `Skipped ${plural(skipped, "purchase", "purchases")}`,
+    returned && `Returned ${returned}`,
+    sold && `Sold ${sold}`,
+    donated && `Donated ${donated}`,
+    co2Kg > 0 && `≈ ${Math.round(co2Kg)} kg CO₂e saved`,
+    recovered > 0 && `${money(recovered)} back`,
+  ].filter(Boolean);
   return parts.join(" · ");
 }
 
-export function impactReply({ skipped, recovered, co2Kg }: Impact): string {
-  if (skipped === 0 && recovered === 0) return "Nothing yet. Text 'do I have this?' next time you're shopping.";
-  const lines = [
-    recovered > 0
-      ? `You've skipped ${plural(skipped, "purchase", "purchases")} and gotten ${money(recovered)} back.`
-      : `You've skipped ${plural(skipped, "purchase", "purchases")}.`,
-  ];
-  if (co2Kg > 0) lines.push(`Not making ${skipped === 1 ? "it" : "those"} saved ${describeKg(co2Kg)}. That's an estimate from Carbonfact's averages per item type.`);
+export function impactReply({ skipped, returned, sold, donated, recovered, co2Kg }: Impact): string {
+  if (skipped + returned + sold + donated === 0) return "Nothing yet. Text 'do I have this?' next time you're shopping.";
+  const did = [
+    skipped && `skipped ${plural(skipped, "purchase", "purchases")}`,
+    returned && `returned ${plural(returned, "item", "items")}`,
+    sold && `sold ${plural(sold, "item", "items")}`,
+    donated && `donated ${plural(donated, "item", "items")}`,
+  ].filter(Boolean) as string[];
+  const list = did.length > 1 ? `${did.slice(0, -1).join(", ")} and ${did.at(-1)}` : did[0]!;
+  const lines = [recovered > 0 ? `You've ${list}, and gotten ${money(recovered)} back.` : `You've ${list}.`];
+  if (co2Kg > 0) lines.push(`That saved ${describeKg(co2Kg)}. That's an estimate from Carbonfact's averages per item type.`);
   if (skipped > 0) lines.push(`That's ${plural(skipped, "fewer thing", "fewer things")} in your closet you didn't need.`);
   return lines.join("\n");
 }

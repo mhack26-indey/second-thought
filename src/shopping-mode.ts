@@ -131,9 +131,9 @@ export function shoppingReplies(result: ShoppingResult, now = new Date()): Reply
   const replies: Reply[] = [[`You already have ${result.matches.length} like this:`, ...lines].join("\n")];
   const photo = result.matches[0]!.photo_url;
   if (photo) replies.push({ photo });
-  // Then what not buying it saves, for the item type in the shopping photo (an estimate; footprint.ts).
-  const skip = skipLine(result.seen[0]!.type);
-  if (skip) replies.push(skip);
+  // Then what not buying it saves, for the item type in the shopping photo (an
+  // estimate; footprint.ts). A type with no estimate still says how to undo the skip.
+  replies.push(skipLine(result.seen[0]!.type) ?? `I've counted this as skipped; if you buy it anyway, text "I didn't skip it".`);
   return replies;
 }
 

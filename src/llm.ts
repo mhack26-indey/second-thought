@@ -79,7 +79,7 @@ export type Action =
   | { action: "stop_fit_checks" }
   | { action: "show_wardrobe" }
   | { action: "add_items"; items: ExtractedItem[] }
-  | { action: "remove_item"; name: string }
+  | { action: "remove_item"; name: string; how?: "returned" | "sold" | "donated" | "trashed"; price?: number }
   | { action: "set_location"; name: string; location: string }
   | { action: "find_item"; name: string }
   | { action: "worth_buying" }
@@ -109,7 +109,7 @@ Possible actions:
 {"action":"stop_fit_checks"}
 {"action":"show_wardrobe"}   (their closet / wardrobe / what they own)
 {"action":"add_items","items":[{"type":"<kind of item>","color":"<if they said>","pattern":"<if they said>","fit":"<if they said>","description":"<the item in their words>"}]}
-{"action":"remove_item","name":"<item exactly as written in their items>"}
+{"action":"remove_item","name":"<item exactly as written in their items>","how":"<sold, donated, returned or trashed, only if they said>","price":<what they sold it for, only if they said>}
 {"action":"set_location","name":"<the item, as written in their items if it's there>","location":"<where they put it, in their words>"}   (they say where they keep or put something)
 {"action":"find_item","name":"<the item, as written in their items if it's there>"}   (they ask where something is)
 {"action":"worth_buying"}   (they ask what they should buy, get next, or are missing)
@@ -164,7 +164,10 @@ const SINGLE_EXAMPLES: [string, object][] = [
       { type: "beanie", color: "red", description: "red beanie" },
     ],
   }],
-  ["donated the gray sweater", { action: "remove_item", name: "gray crewneck" }],
+  ["donated the gray sweater", { action: "remove_item", name: "gray crewneck", how: "donated" }],
+  ["sold my black jeans on depop for $25", { action: "remove_item", name: "black jeans", how: "sold", price: 25 }],
+  ["threw out the old crewneck, it had holes", { action: "remove_item", name: "gray crewneck", how: "trashed" }],
+  ["take the black jeans off my list", { action: "remove_item", name: "black jeans" }],
   ["oh no, the heather sweatpants are actually my grey puma ones", { action: "fit_same", name: "heather grey sweatpants", as: "grey puma sweatpants" }],
   ["that's not a blouse, it's a t-shirt", { action: "fit_relabel", name: "beige blouse", as: "beige t-shirt" }],
   ["you missed my black watch", { action: "fit_missing", name: "black watch" }],
@@ -470,7 +473,10 @@ function validate(raw: any, now: Date): Action | undefined {
     }
     case "remove_item": {
       const name = str(raw.name);
-      return name ? { action: "remove_item", name } : undefined;
+      if (!name) return undefined;
+      const how = ["returned", "sold", "donated", "trashed"].includes(raw.how) ? raw.how : undefined;
+      const price = num(raw.price);
+      return { action: "remove_item", name, ...(how && { how }), ...(how === "sold" && price > 0 && { price }) };
     }
     case "set_location": {
       const name = str(raw.name);
