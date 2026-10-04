@@ -88,6 +88,7 @@ export type Action =
   | { action: "fit_missing"; name: string }
   | { action: "fit_not_there"; name: string }
   | { action: "delete_fit_check" }
+  | { action: "item_count"; name: string }
   | { action: "show_profile" }
   | { action: "update_profile"; city?: string; name?: string }
   | { action: "help" }
@@ -490,6 +491,10 @@ function validate(raw: any, now: Date): Action | undefined {
     case "find_item": {
       const name = str(raw.name);
       return name ? { action: "find_item", name } : undefined;
+    }
+    case "item_count": {
+      const name = str(raw.name);
+      return name ? { action: "item_count", name } : undefined;
     }
     case "fit_same":
     case "fit_relabel": {

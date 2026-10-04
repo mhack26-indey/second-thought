@@ -11,7 +11,7 @@ import { wearCount } from "./closet/repo.ts";
 import { last30Days } from "./recap.ts";
 import { recapFor } from "./recaps.ts";
 import { money } from "./orders.ts";
-import { type Impact, type ImpactEntry, type LetGo, impactHistory, impactSummary, letGo, tossMessage } from "./impact.ts";
+import { type Impact, type ImpactEntry, type LetGo, impactHistory, impactSummary, letGo, setQuantity, tossMessage } from "./impact.ts";
 import {
   type Item,
   type Outfit,
@@ -107,6 +107,7 @@ const STYLE = `  :root { color-scheme: light dark; --muted: #888; --line: #8883;
   .error { color: #d1495b; font-size: 14px; margin: 0; }
   .skipped summary { cursor: pointer; color: var(--muted); font-size: 14px; }
   .right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .count { color: var(--accent, #2f6b4f); font-weight: 700; }
   .letgo summary { cursor: pointer; color: var(--muted); font-size: 12px; list-style: none; }
   .letgo summary::-webkit-details-marker { display: none; }
   .letgo form { display: grid; gap: 6px; margin-top: 6px; min-width: 170px; }
@@ -181,6 +182,12 @@ function page({ user, items: allItems, outfits, reminders: pending, impact, hist
   };
 
   // Sold, donated, or thrown away: each leaves the closet; the first two count.
+  // Identical pieces (three of the same tee): set on the page, never guessed in texts.
+  const quantityForm = (item: Item) => `<details class="letgo qty"><summary>${item.quantity > 1 ? `×${item.quantity} · ` : ""}How many?</summary>
+    <form method="post" action="/w/${user.webToken}/quantity"><input type="hidden" name="item" value="${item.id}">
+      <div><input name="quantity" type="number" min="1" max="99" value="${item.quantity}" aria-label="How many you own"><button>Save</button></div>
+    </form></details>`;
+
   const letGoForm = (item: Item) => `<details class="letgo"><summary>Let it go</summary>
     <form method="post" action="/w/${user.webToken}/let-go"><input type="hidden" name="item" value="${item.id}">
       <div><input name="price" inputmode="decimal" placeholder="$ (optional)" aria-label="Sold for"><button name="how" value="sold">Sold</button></div>
@@ -195,7 +202,7 @@ function page({ user, items: allItems, outfits, reminders: pending, impact, hist
     return `<section><h2>${SECTION_TITLES[cat]} <span>${items.length}</span></h2><ul>${items
       .map(
         (i) =>
-          `<li id="item-${i.id}"${fitsOf.has(i.id) ? ` class="has-photos" data-item="${i.id}"` : ""}><div><span>${esc(i.description)}${i.location ? ` <small>· ${esc(i.location)}</small>` : ""}</span>${thumbs(i)}</div><div class="right"><time>${fmtDate(i.created_at.getTime())}</time>${letGoForm(i)}</div></li>`,
+          `<li id="item-${i.id}"${fitsOf.has(i.id) ? ` class="has-photos" data-item="${i.id}"` : ""}><div><span>${esc(i.description)}${i.quantity > 1 ? ` <b class="count">×${i.quantity}</b>` : ""}${i.location ? ` <small>· ${esc(i.location)}</small>` : ""}</span>${thumbs(i)}</div><div class="right"><time>${fmtDate(i.created_at.getTime())}</time>${quantityForm(i)}${letGoForm(i)}</div></li>`,
       )
       .join("")}</ul></section>`;
   }).join("");
@@ -243,7 +250,7 @@ ${
         .join("")}</ul><p class="note">CO₂ figures are estimates for making a new item of that type, from <a href="https://www.carbonfact.com/carbon-footprint">Carbonfact's category averages</a>: for a skip, the new item that wasn't made; for a return, sale or donation, the new item someone else doesn't buy when this one gets worn again. Driving comparison from the <a href="https://www.epa.gov/greenvehicles/greenhouse-gas-emissions-typical-passenger-vehicle">EPA</a>.</p></details>`
     : ""
 }
-<p class="sub">${plural(allItems.length, "item")} · ${plural(outfits.length, "fit check")}${user.city ? ` · ${esc(user.city)}` : ""}</p>
+<p class="sub">${plural(allItems.reduce((n, i) => n + (i.quantity ?? 1), 0), "piece")} · ${plural(outfits.length, "fit check")}${user.city ? ` · ${esc(user.city)}` : ""}</p>
 ${sections || `<p class="empty">No items yet. Text something like "I have black straight-leg jeans".</p>`}
 <h2 id="fits">Fit checks</h2>
 ${photos ? `<div class="grid">${photos}</div>` : `<p class="empty">No fit checks yet. Send a photo of today's outfit.</p>`}
@@ -609,6 +616,19 @@ ${STYLE}
         if (!card) return new Response("Couldn't draw the recap", { status: 500 });
         return new Response(card, { headers: { "Content-Type": "image/png", "Cache-Control": "private, max-age=300" } });
       },
+      "/w/:token/quantity": {
+        POST: async (req) => {
+          const user = await getUserByToken(req.params.token);
+          if (!user) return new Response("Not found", { status: 404 });
+          const form = await req.formData();
+          const itemId = Number(form.get("item"));
+          const quantity = Number(form.get("quantity"));
+          const item = (await listItems(user.id)).find((i) => i.id === itemId);
+          const ok = item && (await setQuantity(db, user.id, itemId, quantity));
+          const msg = ok ? `You have ${quantity} × ${item!.description}.` : "Pick a number from 1 to 99.";
+          return new Response(null, { status: 303, headers: { Location: `/w/${user.webToken}?msg=${encodeURIComponent(msg)}#item-${itemId}` } });
+        },
+      },
       "/w/:token/let-go": {
         POST: async (req) => {
           const user = await getUserByToken(req.params.token);
@@ -622,12 +642,17 @@ ${STYLE}
           if (item && ["returned", "sold", "donated", "trashed"].includes(how) && (await letGo(db, user.id, itemId, how, price))) {
             const kg = footprintOf(item.type);
             const saved = how !== "trashed" && kg !== null ? ` That's ${describeKg(kg)} saved, est.` : "";
-            msg = {
-              returned: `Marked your ${item.description} as returned.`,
-              sold: `Sold your ${item.description}${price ? ` for ${money(price)}` : ""}.`,
-              donated: `Donated your ${item.description}.`,
-              trashed: tossMessage(item.description, isPlural(item.type), item.created_at, await wearCount(db, item.id)),
-            }[how] + saved;
+            const several = item.quantity > 1 ? ` (${item.quantity - 1} left)` : "";
+            const one = item.quantity > 1 ? `one ${item.description}` : `your ${item.description}`;
+            msg =
+              how === "trashed" && item.quantity === 1
+                ? tossMessage(item.description, isPlural(item.type), item.created_at, await wearCount(db, item.id))
+                : {
+                    returned: `Marked ${one} as returned${several}.`,
+                    sold: `Sold ${one}${price ? ` for ${money(price)}` : ""}${several}.`,
+                    donated: `Donated ${one}${several}.`,
+                    trashed: `Removed ${one}${several}.`,
+                  }[how] + saved;
           }
           return new Response(null, { status: 303, headers: { Location: `/w/${user.webToken}?msg=${encodeURIComponent(msg)}` } });
         },

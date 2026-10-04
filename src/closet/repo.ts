@@ -16,6 +16,7 @@ export interface Item extends ExtractedItem {
   purchase_id: string | null;
   location: string | null;
   location_set_at: Date | null;
+  quantity: number; // identical pieces this item stands for
   status: ItemStatus;
   created_at: Date;
 }

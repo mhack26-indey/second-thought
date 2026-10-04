@@ -146,6 +146,12 @@ function fastPath(text: string): Action | undefined {
   const cancel = /^cancel (?:reminder )?#?(\d+)$/.exec(t);
   if (cancel) return { action: "cancel_reminder", number: Number(cancel[1]) };
   if (/^(my )?(profile|info|settings)$/.test(t)) return { action: "show_profile" };
+  // Quantities: "how many white tees do I have", "I have 3 of the gray crewneck". Answered with a
+  // link to the page (counts aren't changed by text), so these fixed phrasings skip the model.
+  const count =
+    /^how many (?:of )?(?:my |the )?(.+?) do i (?:have|own)$/.exec(t) ??
+    /^(?:i |actually i |i actually )(?:have|own) (?:\d+|two|three|four|five|six|seven|eight|nine|ten) (?:of )?(?:the |my |those |these )?(.+?)(?:,? btw| actually)?$/.exec(t);
+  if (count) return { action: "item_count", name: count[1]! };
   if (/^(change|update|set|edit) (my )?(city|location)$/.test(t)) return { action: "update_profile" };
   // Match the original text so the city or name keeps its capitalization.
   const raw = text.trim().replace(/[.!]+$/, "");
@@ -335,6 +341,14 @@ async function runAction(user: User, action: Action, listed: Reminder[], text = 
       }
       const since = item.location_set_at ? `, since ${fmtDay(item.location_set_at)}` : "";
       return [`Your ${item.description}: ${item.location}${since}.`];
+    }
+
+    case "item_count": {
+      // Counts are edited on the page, where you can see the item; texts only point there.
+      const item = await findOwned(user.id, action.name);
+      if (!item) return [`I couldn't find "${action.name}" in your wardrobe. You can see everything here: ${wardrobeUrl(user)}`];
+      const have = item.quantity > 1 ? `You have ${item.quantity} × ${item.description}.` : `I have one ${item.description} for you.`;
+      return [`${have} To change how many you own, tap "How many?" next to it: ${wardrobeUrl(user)}#item-${item.id}`];
     }
 
     case "delete_fit_check": {
@@ -599,14 +613,19 @@ async function letItGo(user: User, item: Item, how: LetGo, price: number | null)
   if (!(await letGo(db, user.id, item.id, how, price))) return `Couldn't update your ${item.description}.`;
   const kg = footprintOf(item.type);
   const saved = how !== "trashed" && kg !== null ? ` Someone else wearing it saves ${describeKg(kg)} (estimate).` : "";
+  // One of several identical pieces: say how many are left.
+  const several = item.quantity > 1 ? ` (${item.quantity - 1} left)` : "";
+  const one = item.quantity > 1 ? `one ${item.description}` : `your ${item.description}`;
+  if (how === "trashed" && item.quantity === 1) {
+    return tossMessage(item.description, isPlural(item.type), item.created_at, await wearCount(db, item.id));
+  }
   const done = {
-    returned: `Marked your ${item.description} as returned.`,
-    sold: `Nice, sold your ${item.description}${price ? ` for ${money(price)}` : ""}.`,
-    donated: `Donated your ${item.description}. Good call.`,
-    trashed: "",
+    returned: `Marked ${one} as returned${several}.`,
+    sold: `Nice, sold ${one}${price ? ` for ${money(price)}` : ""}${several}.`,
+    donated: `Donated ${one}${several}. Good call.`,
+    trashed: `Removed ${one}${several}.`,
   }[how];
-  if (how === "trashed") return tossMessage(item.description, isPlural(item.type), item.created_at, await wearCount(db, item.id));
-  return done + saved;
+  return done + (how === "trashed" ? "" : saved);
 }
 
 type Correction = Extract<Action, { action: "fit_same" | "fit_relabel" | "fit_missing" | "fit_not_there" }>;

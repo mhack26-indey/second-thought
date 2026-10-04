@@ -103,22 +103,41 @@ export type LetGo = "returned" | "sold" | "donated" | "trashed";
  * False if the item isn't theirs or is already gone.
  */
 export async function letGo(db: Db, userId: string, itemId: number, how: LetGo, price: number | null = null): Promise<boolean> {
-  const [item] = await db.query<{ purchase_id: string | null }>(
-    `UPDATE items SET status = $3 WHERE id = $2 AND user_id = $1 AND status = 'active' RETURNING purchase_id`,
-    [userId, itemId, how === "returned" ? "returned" : "removed"],
+  // One of several identical pieces: one fewer, and the item stays.
+  const [fewer] = await db.query<{ purchase_id: string | null }>(
+    `UPDATE items SET quantity = quantity - 1 WHERE id = $2 AND user_id = $1 AND status = 'active' AND quantity > 1 RETURNING purchase_id`,
+    [userId, itemId],
   );
+  const [item] = fewer
+    ? [fewer]
+    : await db.query<{ purchase_id: string | null }>(
+        `UPDATE items SET status = $3 WHERE id = $2 AND user_id = $1 AND status = 'active' RETURNING purchase_id`,
+        [userId, itemId, how === "returned" ? "returned" : "removed"],
+      );
   if (!item) return false;
   if (how === "returned" && item.purchase_id) {
     await db.query(`UPDATE purchases SET status = 'returned' WHERE id::text = $1 AND user_id = $2`, [item.purchase_id, userId]);
     await recordRecovered(db, item.purchase_id);
   } else if (how === "sold" || how === "donated") {
-    await db.query(
-      `INSERT INTO impact_events (user_id, kind, amount, item_id) VALUES ($1, $2, $3, $4)
-       ON CONFLICT (item_id) WHERE kind IN ('sold', 'donated') DO NOTHING`,
-      [userId, how, how === "sold" ? price : null, itemId],
-    );
+    await db.query(`INSERT INTO impact_events (user_id, kind, amount, item_id) VALUES ($1, $2, $3, $4)`, [
+      userId,
+      how,
+      how === "sold" ? price : null,
+      itemId,
+    ]);
   }
   return true;
+}
+
+/** Sets how many identical pieces an item is (1–99); false if it isn't theirs. */
+export async function setQuantity(db: Db, userId: string, itemId: number, quantity: number): Promise<boolean> {
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99) return false;
+  const rows = await db.query(`UPDATE items SET quantity = $3 WHERE id = $2 AND user_id = $1 AND status = 'active' RETURNING id`, [
+    userId,
+    itemId,
+    quantity,
+  ]);
+  return rows.length > 0;
 }
 
 /** "sold it for $20", "donated", "tossed it" -> how and the price, if any. */
