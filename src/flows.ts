@@ -27,6 +27,8 @@ import {
   deletePhoto,
   latestFitCheck,
   getOutfit,
+  deleteUserData,
+  setPaused,
   photoAt,
   listItems,
   listOutfits,
@@ -106,7 +108,8 @@ export const HELP = [
   '• "you missed my watch" or "that\'s not a blouse, it\'s a tee" to fix your last fit check',
   '• a screenshot of an order, to track its return window ("check returns" to see what to send back)',
   '• "my impact" to see what you skipped buying and got back',
-  '• "fit check at 8am" or "stop fit checks"',
+  '• "fit check at 8am" or "stop fit checks"; "stop" pauses everything until you text again',
+  '• "delete my data" to erase everything and start over',
   '• "my profile" to see your info, "city Detroit" or "call me Sam" to change it',
   "Or send a fit check photo.",
 ].join("\n");
@@ -427,7 +430,38 @@ const shopping = new ShoppingMode({ db });
 const photoDeps = { db, shop: shopping.match.bind(shopping) };
 
 /** Handle a text message; "do I have this?" may answer later, after the vision model. */
+const STOP = /^(?:stop|pause|mute|unsubscribe|stop (?:messaging|texting|notifying|bugging) me|stop (?:all )?(?:messages|notifications|texts)|no more (?:messages|notifications|texts))$/;
+const DELETE_ALL = /^(?:please )?(?:delete|erase|wipe|remove|clear) (?:all )?(?:of )?(?:my )?(?:data|account|info|information|everything|stuff|closet and everything)$|^reset (?:me|my account|everything|my data)$|^start over$/;
+
+// "delete my data" waits for a yes; anything else cancels it.
+const deleteAllQuestions = new Map<string, number>();
+
 export async function handleTextMessage(user: User, text: string): Promise<BotReply> {
+  const t = text.trim().toLowerCase().replace(/[.!?]+$/, "");
+
+  if (deleteAllQuestions.has(user.id)) {
+    const asked = deleteAllQuestions.get(user.id)!;
+    deleteAllQuestions.delete(user.id);
+    if (Date.now() - asked < 10 * 60_000 && /^(?:yes|yeah|yep|y|delete it|do it|i'?m sure)\b/.test(t)) {
+      await deleteUserData(user.id);
+      return { replies: ["Done. Everything's deleted. Text me anytime to start over."] };
+    }
+    if (/^(?:no|nope|nah|cancel|never ?mind|keep it)\b/.test(t)) return { replies: ["Okay, nothing was deleted."] };
+  }
+  if (DELETE_ALL.test(t)) {
+    deleteAllQuestions.set(user.id, Date.now());
+    return {
+      replies: [
+        "Are you sure? This deletes your closet, fit checks, photos, reminders, purchases and impact, and starts you over. Reply yes to delete everything.",
+      ],
+    };
+  }
+  if (STOP.test(t)) {
+    await setPaused(user.id, true);
+    return { replies: ["Sure, I'll hold off on notifications. Once you send me another message, they'll start again."] };
+  }
+  if (user.paused) await setPaused(user.id, false); // any message: they're back
+
   if (user.step === "done") {
     const checkin = await answerCheckin(user, text);
     if (checkin) return { replies: [checkin] };
@@ -461,6 +495,7 @@ export async function handleTextMessage(user: User, text: string): Promise<BotRe
 const VISION_TYPES = new Set<string>(["image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif"]);
 
 export async function handlePhoto(user: User, image: Buffer, mimeType: string): Promise<BotReply> {
+  if (user.paused) await setPaused(user.id, false); // any message: they're back
   if (user.step !== "done") return { replies: [ASK_CITY] };
   const canRead = visionEnabled() && VISION_TYPES.has(mimeType);
   const input: ImageInput = { base64: image.toString("base64"), mediaType: mimeType as MediaType };

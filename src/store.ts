@@ -54,6 +54,7 @@ export interface User {
   lastFitPing: string | null; // local date (YYYY-MM-DD) of the last ping
   lastFitPhoto: string | null; // local date of the last photo they sent
   cityOptions: string[] | null; // places to pick from while step is "city_pick"
+  paused: boolean; // "stop": the bot starts nothing until they text again
 }
 
 export interface Outfit {
@@ -81,6 +82,7 @@ const toUser = (r: any): User => ({
   fitCheckHour: r.fit_check_hour,
   lastFitPing: r.last_fit_ping,
   lastFitPhoto: r.last_fit_photo,
+  paused: r.paused ?? false,
   cityOptions: r.city_options ? JSON.parse(r.city_options) : null,
 });
 
@@ -124,7 +126,7 @@ export async function updateUser(id: string, patch: UserPatch): Promise<void> {
 
 /** Users who finished onboarding and have the daily fit check on. */
 export async function fitCheckUsers(): Promise<User[]> {
-  const rows = await sql`select * from users where step = 'done' and fit_check_hour is not null`;
+  const rows = await sql`select * from users where step = 'done' and fit_check_hour is not null and not paused`;
   return rows.map(toUser);
 }
 
@@ -143,7 +145,7 @@ export async function claimFitPing(id: string, today: string): Promise<boolean> 
 export async function claimRecaps(month: string, from: string, to: string): Promise<string[]> {
   const rows = await sql`
     update users u set last_recap = ${month}
-    where u.step = 'done' and u.last_recap is distinct from ${month}
+    where u.step = 'done' and not u.paused and u.last_recap is distinct from ${month}
       and exists (select 1 from outfits o where o.user_id = u.id and o.taken_on >= ${from}::date and o.taken_on < ${to}::date)
     returning u.id`;
   return rows.map((r: any) => r.id);
@@ -153,10 +155,28 @@ export async function claimRecaps(month: string, from: string, to: string): Prom
 export async function claimCheckinUsers(today: string): Promise<string[]> {
   const rows = await sql`
     update users set last_checkin_ask = ${today}::date
-    where step = 'done' and city is not null
+    where step = 'done' and city is not null and not paused
       and (last_checkin_ask is null or last_checkin_ask <= ${today}::date - 7)
     returning id`;
   return rows.map((r: any) => r.id);
+}
+
+/** "stop": hold everything the bot would start; any message they send turns it back on. */
+export async function setPaused(id: string, paused: boolean): Promise<void> {
+  await sql`update users set paused = ${paused} where id = ${id}`;
+}
+
+/**
+ * "delete my data": everything the bot keeps about them, the user row last,
+ * so their next text starts over as a new user. Wears go with items and
+ * outfits; photos, reminders, purchases, impact and check-ins with the user.
+ */
+export async function deleteUserData(id: string): Promise<void> {
+  await sql.begin(async (tx) => {
+    await tx`delete from items where user_id = ${id}`;
+    await tx`delete from outfits where user_id = ${id}`;
+    await tx`delete from users where id = ${id}`;
+  });
 }
 
 export async function releaseRecap(id: string): Promise<void> {
@@ -295,9 +315,10 @@ export async function cancelReminder(userId: string, id: string): Promise<boolea
 /** Atomically marks due reminders as sent and returns them for delivery. */
 export async function claimDueReminders(): Promise<(Reminder & { userId: string })[]> {
   const rows = await sql`
-    update reminders set sent = true
-    where not sent and due_at <= now()
-    returning id, user_id, text, due_at`;
+    update reminders r set sent = true
+    where not r.sent and r.due_at <= now()
+      and not exists (select 1 from users u where u.id = r.user_id and u.paused) -- held until they're back
+    returning r.id, r.user_id, r.text, r.due_at`;
   return rows.map((r: any) => ({ id: r.id, userId: r.user_id, text: r.text, at: r.due_at.getTime() }));
 }
 
