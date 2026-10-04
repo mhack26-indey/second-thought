@@ -1,6 +1,63 @@
 # Roadmap status
 
-Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 4, 2026, after the Nike-style redesign.
+## Handoff (Oct 4, 2026)
+
+For whoever tests next. Everything below is on `main`; `bun test` (150 tests), `bunx tsc --noEmit` and `bun run smoke:demo` all pass.
+
+### Built tonight
+- **Closet dump onboarding:** photos of a closet rail, pile or drawer add every item (no wears); "add my closet" opens 10 minutes of it; onboarding offers it.
+- **Usage guide:** onboarding ends with the three-photo loop; `/w/<token>/guide` and public `/guide` list every command with Copy buttons; a test fails if a router intent has no entry.
+- **"What should I get rid of?":** up to 5 picks from wears, seasons, near-duplicates and never-worn; return / resell / donate exits; "sold 2", "donated 2", "returned 1".
+- **Profile details:** name, age range, week, sizes, asked in onboarding and editable by text or on the page; sizes go into every Depop/eBay link.
+- **Nike-style redesign** of every page and the recap card (`docs/DESIGN-nike.md`), with page cross-fades.
+- **Demo seed from real photos,** as Inesh (18–24; class, gym, going out; S); it prints the closet and both recommendation replies.
+- **"Show my closet" / "show my fit checks"** by text.
+- **`bun run smoke:demo`:** the whole demo conversation on a throwaway database with the models stubbed, every reply printed.
+
+### Not built
+- **Season-aware "what should I buy for winter?"** It goes to the existing "what should I buy?" (outfit gap, notes for their week, budget line, sized secondhand links), which doesn't look at the coming season.
+- **Weekly recap push.** The monthly one (on the 1st) exists; "my recap" sends one on demand.
+- **CSV export** of the closet.
+
+### How to run the live test
+1. Create (or reuse) the Neon branch and point this shell at it:
+   ```sh
+   npx neonctl branches create --name demo        # skip if it exists
+   export DATABASE_URL="$(npx neonctl connection-string demo)"
+   ```
+2. Find the demo phone's sender ID. The bot doesn't log it, so: run `bun start`, text the bot once from the demo phone, stop the bot, then read the ID:
+   ```sh
+   bun -e 'const { sql } = await import("./src/store.ts"); console.log(await sql`select id, created_at from users order by created_at desc limit 3`); await sql.close()'
+   ```
+   Use it exactly as shown (`+1…`, or an email for iMessage, a number for Telegram).
+3. Seed (about 5 minutes; real vision calls): `DEMO_PHONE='<that id>' bun run seed:demo`. Check the printed closet and the two replies.
+4. `bun start` in the same shell, then the demo on the real phone: a fit check; "show my closet"; "do I have this?" then a photo of something you own, reply "skip"; an order screenshot; "what should I get rid of?" (the Zara jacket: **before** "return", or it's gone); "check returns", then "return"; "my impact"; "show my fit checks"; "my recap".
+5. Notes:
+   - "check returns" skips orders placed in the last 7 days, so a fresh screenshot won't be nudged on the spot. The seeded Zara jacket (25 days old) is the one it asks about.
+   - **Rerun the seed before each rehearsal.** It wipes and recreates only the demo user.
+
+### Remaining submission tasks, in order
+1. Live run on a real phone, noting reply timings (the bot logs `[timing]` per message).
+2. Backup video of the demo.
+3. README pass for the LLM judge.
+4. Devpost.
+5. Figma frames from the current design: no Nike names or logos anywhere visible (the style is borrowed from their design analysis; our name and type only).
+6. Screenshots, including the recap card.
+7. Make the repo public right before submitting (check `.env` and `demo_images/` photos aren't committed; both are gitignored).
+
+### Known issues found tonight
+- **The bot doesn't log sender IDs,** hence step 2 above.
+- **The seeded closet has one declutter pick.** It was all worn in the last 3 weeks, so "what should I get rid of?" shows only the never-worn Zara jacket, and "Nothing to clear out" once it's returned.
+- **"Do I have this?" now asks "Skip it?" before counting** (#36). Reply "skip" during the demo, or "my impact" won't show the new skip.
+- **Short names use the item type,** so chinos read as "beige pants" in "show my closet" and fit check lists.
+- **A city must be in their words.** One the router's model fills in without it appearing in the text is dropped and asked again ("moved to NYC" read as "New York" gets asked). This guards against cities copied from prompt examples.
+- **The smoke test stubs the text model with empty answers,** so it covers every command handled before the router, not free-form routing. `bun run eval` covers that: 64/65, the miss being one item dropped from a long chained message.
+- **The seed takes about 5 minutes** for 15 photos.
+- **Cosmetic:** one merge commit message on `main` has stray quotes (left alone: fixing it needs a force-push). `flows.ts` has two unused imports from upstream.
+
+---
+
+Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 4, 2026, after the handoff.
 
 **Legend:** ✅ done · 🟡 partly done · ⬜ not started · ✂️ dropped by a plan change
 

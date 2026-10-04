@@ -7,6 +7,7 @@ import { WINDOW_DAYS } from "./gaps.ts";
 import { type BotReply, type RecentFitCheck, ShoppingMode, isShoppingCaption } from "./shopping-mode.ts";
 import { readClosetPhoto, readPhoto } from "./photo-intake.ts";
 import { ClosetMode } from "./closet-mode.ts";
+import { closetSummary, fitCheckReplies, isShowCloset, isShowFitChecks } from "./show.ts";
 import { answerDeclutter, declutterPicks, declutterReplies, isDeclutterAsk, saveDeclutterList } from "./declutter.ts";
 import { PROFILE_QUESTION, type ProfilePatch, buyAdvice, describePatch, nextProfileStep, parseProfile, quickProfileEdit, reaskQuestion, saveProfile } from "./profile.ts";
 import { answerFromCloset } from "./ask.ts";
@@ -40,6 +41,7 @@ import {
   photoAt,
   listItems,
   listOutfits,
+  listWears,
   localDate,
   pendingReminders,
   removeItem,
@@ -558,6 +560,15 @@ export async function handleTextMessage(user: User, text: string): Promise<BotRe
     // "add my closet", or "done" / "skip" while closet mode is open (closet-mode.ts)
     const closetText = closet.onText(user.id, text);
     if (closetText) return closetText;
+    // "show my fit checks", "show my closet" (show.ts)
+    if (isShowFitChecks(text)) {
+      const [outfits, wears, items] = await Promise.all([listOutfits(user.id), listWears(user.id), listItems(user.id)]);
+      return { replies: fitCheckReplies(outfits, wears, items, wardrobeUrl(user)) };
+    }
+    if (isShowCloset(text)) {
+      const [items, wears] = await Promise.all([listItems(user.id), listWears(user.id)]);
+      return { replies: [closetSummary(items, wears, wardrobeUrl(user))] };
+    }
     // "what should I get rid of?", then "sold 2" / "donated 2" (declutter.ts)
     if (isDeclutterAsk(text)) {
       const climate = user.city ? await climateFor(db, user.city).catch(() => undefined) : undefined;

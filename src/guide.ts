@@ -13,6 +13,8 @@ export type Intent =
   | "declutter"
   | "declutter_answer"
   | "profile_size"
+  | "show_fit_checks"
+  | "show_closet"
   | "shopping_check"
   | "unskip"
   | "order_photo"
@@ -62,6 +64,8 @@ export const GUIDE: GuideSection[] = [
       { intent: "delete_fit_check", command: "delete my last fit check", does: "Removes your latest fit check, after you confirm." },
       { intent: "declutter", command: "what should I get rid of?", does: "Up to 5 things you don't wear (unworn all season, a near-duplicate you skip, never worn), each with the way out: return it if you still can, resell (with when to list it) or donate.", reply: "1. navy polo with white trim: You have 2 navy polos; you wear the other one 5× more. Resell it in March…" },
       { intent: "declutter_answer", command: "sold 2", does: 'After that list: marks number 2 as sold ("sold 2 for $15", "donated 1") and counts it as kept in circulation.' },
+      { intent: "show_closet", command: "show my closet", does: 'Your closet by category, most-worn first (also "my items", "what do I own").', reply: "Tops (9): navy polo (3 wears), white t-shirt (2 wears), … + 4 more" },
+      { intent: "show_fit_checks", command: "show my fit checks", does: 'Your last 6 fit check photos, each with its date and what you wore (also "my ootds", "my outfits").' },
       { intent: "show_wardrobe", command: "my wardrobe", does: "Links your wardrobe page: everything you own, every fit check.", reply: "23 items in your wardrobe: (link)" },
     ],
   },
@@ -145,7 +149,7 @@ export const wardrobeLinkMessage = (wardrobeLink: string) => `Your wardrobe page
 /** The short command list for "help", ending with the guide link. */
 const HELP = [
   "You can text me things like:",
-  '• "my wardrobe" to see your closet',
+  '• "my wardrobe" to see your closet, "show my closet" or "show my fit checks" for it here',
   '• "I just got black jeans" to add clothes',
   '• "remind me tomorrow to return the jacket"',
   '• "my reminders" to see your schedule',

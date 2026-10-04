@@ -4,7 +4,7 @@ import { publicGuideResponse, userGuideResponse } from "./guide-page.ts";
 import { climateFor } from "./climate.ts";
 import { type LetGoPick, declutterPicks } from "./declutter.ts";
 import { AGE_RANGES, OCCASIONS, type Occasion, type ProfilePatch, saveProfile } from "./profile.ts";
-import { BOT_NUMBER_DISPLAY, CATEGORY_NAMES, FONTS, PIN, SEASONS, START_LINK, STAT_ICONS, STYLE, TOKENS, esc, icon, svg, tabs } from "./web-style.ts";
+import { BOT_NUMBER_DISPLAY, CATEGORY_NAMES, FONTS, PIN, SEASONS, START_LINK, STAT_ICONS, SECTION_TITLES, STYLE, TOKENS, esc, icon, svg, tabs } from "./web-style.ts";
 import { cityFrom, findCities } from "./cities.ts";
 import { PORT, PUBLIC_URL } from "./config.ts";
 import { addItemToOutfit, deleteFitCheck, itemsOnlyIn, linkItem, mergeItems, unlinkItem } from "./fit-edits.ts";
@@ -59,16 +59,6 @@ const MAX_FIELD = 60;
 const fmtDate = (at: number) => new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 const fmtWhen = (at: number) =>
   new Date(at).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-
-const SECTION_TITLES: Record<Category, string> = {
-  top: "tops",
-  bottom: "bottoms",
-  dress: "dresses",
-  outerwear: "outerwear",
-  shoes: "shoes",
-  accessory: "accessories",
-  jewelry: "jewelry",
-};
 
 interface PageData {
   user: User;

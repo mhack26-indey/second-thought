@@ -284,6 +284,16 @@ export const STAT_ICONS = {
   co2: '<path d="M5 19c0-8 5-13 14-14-1 9-6 14-14 14Z"/><path d="M5 19 13 11"/>',
 };
 export const PIN = '<path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11Z"/><circle cx="12" cy="10" r="2"/>';
+/** Category names as a list's heading ("tops", "accessories"). */
+export const SECTION_TITLES: Record<Category, string> = {
+  top: "tops",
+  bottom: "bottoms",
+  dress: "dresses",
+  outerwear: "outerwear",
+  shoes: "shoes",
+  accessory: "accessories",
+  jewelry: "jewelry",
+};
 export const SEASONS: Record<string, string> = { warm: "warm weather", cold: "cold weather", all: "all seasons" };
 export const CATEGORY_NAMES: Record<Category, string> = {
   top: "top",

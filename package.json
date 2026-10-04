@@ -10,6 +10,7 @@
     "extract": "bun scripts/extract-test-images.ts",
     "migrate": "bun scripts/migrate.ts",
     "seed:demo": "bun scripts/seed-demo.ts",
+    "smoke:demo": "bun scripts/smoke-demo.ts",
     "eval:closet": "bun scripts/eval-closet.ts",
     "test": "bun test"
   },
@@ -22,6 +23,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
+    "@electric-sql/pglite-socket": "^0.2.11",
     "@types/bun": "latest",
     "@types/qrcode": "^1.5.6",
     "typescript": "^5"

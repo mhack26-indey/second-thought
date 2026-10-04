@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { isClosetModeStart } from "./closet-mode.ts";
 import { isDeclutterAsk } from "./declutter.ts";
 import { quickProfileEdit } from "./profile.ts";
+import { isShowCloset, isShowFitChecks } from "./show.ts";
 import { GUIDE, UNDOCUMENTED, helpText, onboardingIntro, wardrobeLinkMessage } from "./guide.ts";
 import { guidePage, publicGuideResponse, userGuideResponse } from "./guide-page.ts";
 import { isImpactAsk, isUnskip } from "./impact.ts";
@@ -44,6 +45,8 @@ test("the guide's commands for pre-router features are ones the bot recognizes",
   expect(isImpactAsk(entryFor("impact").command)).toBe(true);
   expect(isUnskip(entryFor("unskip").command)).toBe(true);
   expect(isDeclutterAsk(entryFor("declutter").command)).toBe(true);
+  expect(isShowCloset(entryFor("show_closet").command)).toBe(true);
+  expect(isShowFitChecks(entryFor("show_fit_checks").command)).toBe(true);
   expect(quickProfileEdit(entryFor("profile_size").command)).toEqual({ patch: { sizeShoe: "10" }, under18: false });
 });
 

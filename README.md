@@ -24,6 +24,7 @@ Built for MHacks on [Spectrum](https://photon.codes/docs/spectrum-ts) (Photon's 
 | "what should I actually buy?" | Finds the gap in what you wear: "You wear 6 bottoms with the same 2 tops. A gray top would go with all of them: 6 new outfits." If nothing stands out, it says to buy nothing. |
 | "remind me friday at 5pm to return the jacket" | Sends the reminder at that time |
 | "fit check at 8am" / "stop fit checks" | Moves or turns off the daily fit check prompt |
+| "show my closet" / "show my fit checks" | Your closet by category, most worn first ("Tops (9): navy polo (3 wears), …"), or your last 6 fit check photos with what you wore; each with the wardrobe link |
 | "my wardrobe" | A link to your wardrobe page: items by category, where they're kept, fit check photos, reminders, and an editable profile |
 | "my shoe size is 10", "I work in an office now" | Updates your profile (also editable on the wardrobe page). Your week shapes "what should I buy?" (the gym with no athletic shoes, office days with no office pieces, checked against what you already own, storage included), your sizes go into every Depop/eBay link, and your age range only changes the budget line (secondhand first when younger), never what's suggested. Your name shows up in greetings, fit check replies and the recap. An age range is stored, never an age; under 18 is stored as nothing. |
 | "help" | The short list of things it understands, ending with a link to the full guide: every command with an example reply and a Copy button, at `/w/<token>/guide` (a tab next to your closet) and publicly at `/guide` |
@@ -123,7 +124,7 @@ What the numbers hide:
 - **Name grouping:** 9 of 9 tricky color and pattern names sorted correctly (charcoal, heather grey, dark blue, khaki, maroon, sage, pinstripe, gingham, logo). The matcher kept a graphic tee, a plain tee, navy jeans and black jeans apart while matching grey with charcoal.
 - **Extraction:** on a real outfit photo sent twice (once as HEIC, once as JPEG), Gemini found the same 6 items both times in about 2s. Two of them came back with drifted names (off-white → beige, plus a second color on the sunglasses), which is why neighboring shades now match.
 - **Vision matching** (10 street-style test photos, 6 of the same person on different days, run end to end on a local database): resending a photo added no duplicates (5 of 5 items, then 8 of 8 on a 54-item closet). The same leather-panel top was recognized across two days although its descriptions differed, and different people's items never merged. A cropped "shopping photo" of camo pants matched the owned pants as `near_identical`, and matched nothing before they were in the closet. On 5 hard cases run 5 times each: 19 of 25 right. The misses: two woven black bags (a flap bag and a tote) merged in 4 of 5 runs, and a resent top in a crowded closet was missed in 2 of 5.
-- **Tests:** 143 unit and database tests (`bun test`, using in-process Postgres via PGlite).
+- **Tests:** 150 unit and database tests (`bun test`, using in-process Postgres via PGlite).
 
 ## Setup
 
@@ -157,6 +158,7 @@ bun start
 | `bun run eval` | Router accuracy against the configured text model |
 | `bun run extract` | Run extraction on the photos in `test_images/` (not checked in; see `test_images/ATTRIBUTION.md`) |
 | `bun run migrate` | Create or update tables on `DATABASE_URL` |
+| `bun run smoke:demo` | The demo conversation end to end on a throwaway database with the models stubbed; prints every reply, fails on an error or empty reply |
 | `bun run seed:demo` | Reset the demo user to a closet built from the real photos in `demo_images/` (below) |
 | `bun run eval:closet` | Closet accuracy on the real photos against `demo_images/labels.json` (about 18 minutes; writes `eval/closet-results.md`) |
 
