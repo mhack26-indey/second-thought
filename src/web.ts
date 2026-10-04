@@ -6,8 +6,9 @@ import { addItemToOutfit, linkItem, mergeItems, unlinkItem } from "./fit-edits.t
 import type { ExtractedItem } from "./closet/extract.ts";
 import { colorIn, itemFromName } from "./llm.ts";
 import { exactGroups, llmGroups, mostAlike, searchItems } from "./match.ts";
-import { aNew, describeKg } from "./footprint.ts";
-import { type Impact, type Skipped, impactSummary, skippedPurchases } from "./impact.ts";
+import { aNew, describeKg, footprintOf } from "./footprint.ts";
+import { money } from "./orders.ts";
+import { type Impact, type ImpactEntry, type LetGo, impactHistory, impactSummary, letGo } from "./impact.ts";
 import {
   type Item,
   type Outfit,
@@ -97,6 +98,14 @@ const STYLE = `  :root { color-scheme: light dark; --muted: #888; --line: #8883;
   .saved { color: #2a9d5c; font-size: 14px; margin: 0; }
   .error { color: #d1495b; font-size: 14px; margin: 0; }
   .skipped summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+  .right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .letgo summary { cursor: pointer; color: var(--muted); font-size: 12px; list-style: none; }
+  .letgo summary::-webkit-details-marker { display: none; }
+  .letgo form { display: grid; gap: 6px; margin-top: 6px; min-width: 170px; }
+  .letgo form div { display: flex; gap: 6px; }
+  .letgo input { width: 80px; padding: 6px 8px; font-size: 14px; }
+  .letgo button { padding: 6px 10px; font-size: 14px; }
+  .letgo button.quiet { background: transparent; color: inherit; border: 1px solid var(--line); font-weight: normal; }
   .skipped li small { display: block; }
   .skipped .note { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
   .skipped .note a { color: inherit; }
@@ -129,14 +138,15 @@ interface PageData {
   outfits: Outfit[];
   reminders: Reminder[];
   impact: Impact;
-  skipped: Skipped[];
+  history: ImpactEntry[];
+  notice?: string;
   wears: { outfitId: number; itemId: number }[];
   saved: boolean;
   cityChoices?: { typed: string; options: string[] }; // several places matched what they typed
   cityNotFound?: string;
 }
 
-function page({ user, items: allItems, outfits, reminders: pending, impact, skipped, wears, saved, cityChoices, cityNotFound }: PageData): string {
+function page({ user, items: allItems, outfits, reminders: pending, impact, history, notice, wears, saved, cityChoices, cityNotFound }: PageData): string {
   // Items link to the fit checks they were seen in, and each fit check lists
   // its items, so you can check what the vision model matched.
   const outfitById = new Map(outfits.map((o) => [o.id, o]));
@@ -161,13 +171,22 @@ function page({ user, items: allItems, outfits, reminders: pending, impact, skip
       .join("")}<small>worn ${fits.length}×</small></button>`;
   };
 
+  // Sold, donated, or thrown away: each leaves the closet; the first two count.
+  const letGoForm = (item: Item) => `<details class="letgo"><summary>Let it go</summary>
+    <form method="post" action="/w/${user.webToken}/let-go"><input type="hidden" name="item" value="${item.id}">
+      <div><input name="price" inputmode="decimal" placeholder="$ (optional)" aria-label="Sold for"><button name="how" value="sold">Sold</button></div>
+      <button name="how" value="donated" class="quiet">Donated</button>
+      ${item.purchase_id ? `<button name="how" value="returned" class="quiet">Returned</button>` : ""}
+      <button name="how" value="trashed" class="quiet">Threw it away</button>
+    </form></details>`;
+
   const sections = CATEGORIES.map((cat) => {
     const items = allItems.filter((i) => i.category === cat);
     if (!items.length) return "";
     return `<section><h2>${SECTION_TITLES[cat]} <span>${items.length}</span></h2><ul>${items
       .map(
         (i) =>
-          `<li id="item-${i.id}"${fitsOf.has(i.id) ? ` class="has-photos" data-item="${i.id}"` : ""}><div><span>${esc(i.description)}${i.location ? ` <small>· ${esc(i.location)}</small>` : ""}</span>${thumbs(i)}</div><time>${fmtDate(i.created_at.getTime())}</time></li>`,
+          `<li id="item-${i.id}"${fitsOf.has(i.id) ? ` class="has-photos" data-item="${i.id}"` : ""}><div><span>${esc(i.description)}${i.location ? ` <small>· ${esc(i.location)}</small>` : ""}</span>${thumbs(i)}</div><div class="right"><time>${fmtDate(i.created_at.getTime())}</time>${letGoForm(i)}</div></li>`,
       )
       .join("")}</ul></section>`;
   }).join("");
@@ -200,14 +219,18 @@ function page({ user, items: allItems, outfits, reminders: pending, impact, skip
 ${STYLE}</style></head><body>
 <h1>${user.name ? `${esc(user.name)}'s` : "Your"} wardrobe</h1>
 <p class="impact">${impactSummary(impact)}</p>
+${notice ? `<p class="notice">${esc(notice)}</p>` : ""}
 ${
-  skipped.length
-    ? `<details class="skipped"><summary>Here's what you skipped</summary><ul>${skipped
-        .map(
-          (k) =>
-            `<li><span>${esc(aNew(k.type))}, like your ${esc(k.description)}${k.co2Kg === null ? "" : ` <small>${describeKg(k.co2Kg)}</small>`}</span><time>${fmtDate(k.at.getTime())}</time></li>`,
-        )
-        .join("")}</ul><p class="note">CO₂ figures are estimates for making a new item of that type, from <a href="https://www.carbonfact.com/carbon-footprint">Carbonfact's category averages</a>; driving comparison from the <a href="https://www.epa.gov/greenvehicles/greenhouse-gas-emissions-typical-passenger-vehicle">EPA</a>.</p></details>`
+  history.length
+    ? `<details class="skipped"><summary>Here's what you saved</summary><ul>${history
+        .map((k) => {
+          const what =
+            k.kind === "avoided"
+              ? `Skipped ${esc(aNew(k.type))}, like your ${esc(k.description)}`
+              : `${k.kind === "recovered" ? "Returned" : k.kind === "sold" ? "Sold" : "Donated"} your ${esc(k.description)}${k.amount ? ` for ${money(k.amount)}` : ""}`;
+          return `<li><span>${what}${k.co2Kg === null ? "" : ` <small>${describeKg(k.co2Kg)}</small>`}</span><time>${fmtDate(k.at.getTime())}</time></li>`;
+        })
+        .join("")}</ul><p class="note">CO₂ figures are estimates for making a new item of that type, from <a href="https://www.carbonfact.com/carbon-footprint">Carbonfact's category averages</a>: for a skip, the new item that wasn't made; for a return, sale or donation, the new item someone else doesn't buy when this one gets worn again. Driving comparison from the <a href="https://www.epa.gov/greenvehicles/greenhouse-gas-emissions-typical-passenger-vehicle">EPA</a>.</p></details>`
     : ""
 }
 <p class="sub">${plural(allItems.length, "item")} · ${plural(outfits.length, "fit check")}${user.city ? ` · ${esc(user.city)}` : ""}</p>
@@ -298,7 +321,7 @@ ${photos ? `<div class="grid">${photos}</div>` : `<p class="empty">No fit checks
 
   document.addEventListener("click", (e) => {
     const target = e.target.closest("[data-item]");
-    if (target && !e.target.closest("a")) {
+    if (target && !e.target.closest("a, details, form")) {
       e.preventDefault();
       show(target.dataset.item);
     }
@@ -490,13 +513,13 @@ export function startWebServer() {
       "/w/:token": async (req) => {
         const user = await getUserByToken(req.params.token);
         if (!user) return new Response("Not found", { status: 404 });
-        const [items, outfits, reminders, impact, wears, skipped] = await Promise.all([
+        const [items, outfits, reminders, impact, wears, history] = await Promise.all([
           listItems(user.id),
           listOutfits(user.id),
           pendingReminders(user.id),
           impactFor(user.id),
           listWears(user.id),
-          skippedPurchases(db, user.id),
+          impactHistory(db, user.id),
         ]);
         const params = new URL(req.url).searchParams;
         const saved = params.has("saved");
@@ -505,7 +528,7 @@ export function startWebServer() {
         const options = typed ? (await findCities(typed).catch(() => [])).map((c) => c.label) : [];
         const cityChoices = typed && options.length > 1 ? { typed, options } : undefined;
         const cityNotFound = params.get("cityNotFound") ?? undefined;
-        return new Response(page({ user, items, outfits, reminders, impact, skipped, wears, saved, cityChoices, cityNotFound }), {
+        return new Response(page({ user, items, outfits, reminders, impact, history, notice: params.get("msg") ?? undefined, wears, saved, cityChoices, cityNotFound }), {
           headers: { "Content-Type": "text/html; charset=utf-8" },
         });
       },
@@ -540,6 +563,29 @@ export function startWebServer() {
           await updateUser(user.id, patch);
           // Post/redirect/get so a refresh doesn't resubmit the form.
           return new Response(null, { status: 303, headers: { Location: redirect } });
+        },
+      },
+      "/w/:token/let-go": {
+        POST: async (req) => {
+          const user = await getUserByToken(req.params.token);
+          if (!user) return new Response("Not found", { status: 404 });
+          const form = await req.formData();
+          const itemId = Number(form.get("item"));
+          const how = String(form.get("how")) as LetGo;
+          const price = Number(String(form.get("price") ?? "").replace(/[^0-9.]/g, "")) || null;
+          const item = (await listItems(user.id)).find((i) => i.id === itemId);
+          let msg = "Couldn't update that item.";
+          if (item && ["returned", "sold", "donated", "trashed"].includes(how) && (await letGo(db, user.id, itemId, how, price))) {
+            const kg = footprintOf(item.type);
+            const saved = how !== "trashed" && kg !== null ? ` That's ${describeKg(kg)} saved, est.` : "";
+            msg = {
+              returned: `Marked your ${item.description} as returned.`,
+              sold: `Sold your ${item.description}${price ? ` for ${money(price)}` : ""}.`,
+              donated: `Donated your ${item.description}.`,
+              trashed: `Removed your ${item.description}.`,
+            }[how] + saved;
+          }
+          return new Response(null, { status: 303, headers: { Location: `/w/${user.webToken}?msg=${encodeURIComponent(msg)}` } });
         },
       },
       "/w/:token/fit/:id/search": async (req) => {

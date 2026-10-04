@@ -80,8 +80,10 @@ export function aNew(type: string): string {
 }
 
 /** The shopping reply's last line, or undefined for a type with no estimate. */
+// The match is counted as skipped right away (impact.ts), so the line says how
+// to take it back if they buy it anyway.
 export function skipLine(type: string): string | undefined {
   const kg = footprintOf(type);
   if (kg === null) return undefined;
-  return `Skip it: making ${aNew(type)} emits ${describeKg(kg)}. Estimate from Carbonfact's average for the category.`;
+  return `Skip it: making ${aNew(type)} emits ${describeKg(kg)} (estimate from Carbonfact's average for the category). I've counted this as skipped; if you buy it anyway, text "I didn't skip it".`;
 }
