@@ -84,11 +84,14 @@ export function aNew(type: string): string {
   return PAIRS.has(type) ? `a new pair of ${type}` : `a new ${type}`;
 }
 
-/** The shopping reply's last line, or undefined for a type with no estimate. */
-// The match is counted as skipped right away (impact.ts), so the line says how
-// to take it back if they buy it anyway.
-export function skipLine(type: string): string | undefined {
+const SKIP_ASK = `Reply "skip" and I'll count it, or "buying it" if you're getting it anyway.`;
+
+/**
+ * The shopping reply's last line: asks whether they're skipping it, with what
+ * skipping saves. Nothing counts until they answer (ShoppingMode.answerSkip).
+ */
+export function skipLine(type: string): string {
   const kg = footprintOf(type);
-  if (kg === null) return undefined;
-  return `Skip it: making ${aNew(type)} emits ${describeKg(kg)} (estimate from Carbonfact's average for the category). I've counted this as skipped; if you buy it anyway, text "I didn't skip it".`;
+  if (kg === null) return `Skip it? ${SKIP_ASK}`;
+  return `Skip it? Making ${aNew(type)} emits ${describeKg(kg)}, estimated from Carbonfact's average for the category. ${SKIP_ASK}`;
 }

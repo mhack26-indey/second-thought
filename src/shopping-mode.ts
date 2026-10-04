@@ -25,6 +25,10 @@ export interface BotReply {
 }
 
 export const PENDING_MS = 5 * 60_000;
+export const SKIP_WINDOW_MS = 6 * 60 * 60_000; // a shopping trip
+
+const SKIP = /^(?:yes,? )?(?:skip|skipping|skipped|i'?ll skip(?: it)?|i'?m skipping(?: it)?|pass|i'?ll pass|not buying(?: it)?|nah,? skip(?:ping)?(?: it)?)$/;
+const BUY = /^(?:buy|buying(?: it)?|i'?m buying(?: it)?|i'?ll buy(?: it)?|getting it|i'?m getting it|bought it(?: anyway)?|got it anyway)$/;
 export const UNDO_MS = 2 * 60_000;
 
 // Whole-message phrasings only, so "remind me to go shopping" stays a reminder
@@ -65,6 +69,8 @@ type MatchDeps = NonNullable<Parameters<typeof matchShoppingPhoto>[3]>;
 
 export class ShoppingMode {
   private pending = new Map<string, number>(); // user -> window closes at
+  // After a match: the owned item it matched, until they say whether they're skipping it.
+  private skipQuestions = new Map<string, { itemId: number; asked: number }>();
   private recent = new Map<string, RecentFitCheck>();
 
   constructor(private deps: { db: Db; now?: () => number; match?: MatchDeps }) {}
@@ -110,13 +116,31 @@ export class ShoppingMode {
       console.error(`shopping match failed for ${userId}`, err);
       return ["I couldn't make out that photo. Try another one?"];
     }
+    // A match is a suggestion to skip, not a skip: it counts once they say so (answerSkip).
     const top = result.matches[0];
-    if (top) {
-      await recordAvoided(this.deps.db, userId, top.item_id, new Date(this.now())).catch((err) =>
-        console.error(`impact event for ${userId} failed`, err),
-      );
-    }
+    if (top) this.skipQuestions.set(userId, { itemId: top.item_id, asked: this.now() });
     return shoppingReplies(result, new Date(this.now()));
+  }
+
+  /**
+   * Their answer to "Skip it?": "skip" counts it as a skipped purchase,
+   * "buying it" doesn't. Anything else leaves the question open (for the length
+   * of a shopping trip). Undefined if there's no question or it isn't an answer.
+   */
+  async answerSkip(userId: string, text: string): Promise<string | undefined> {
+    const question = this.skipQuestions.get(userId);
+    if (!question || this.now() - question.asked > SKIP_WINDOW_MS) return undefined;
+    const t = text.trim().toLowerCase().replace(/[.!]+$/, "");
+    if (SKIP.test(t)) {
+      this.skipQuestions.delete(userId);
+      await recordAvoided(this.deps.db, userId, question.itemId, new Date(this.now()));
+      return `Counted. Nice skip. (Text "my impact" to see your total.)`;
+    }
+    if (BUY.test(t)) {
+      this.skipQuestions.delete(userId);
+      return "Got it, I won't count that one.";
+    }
+    return undefined;
   }
 
   private async undoAndMatch(userId: string, fit: RecentFitCheck): Promise<Reply[]> {
@@ -141,10 +165,8 @@ export function shoppingReplies(result: ShoppingResult, now = new Date()): Reply
   const replies: Reply[] = [[`You already have ${result.matches.length} like this:`, ...lines].join("\n")];
   const photo = result.matches[0]!.photo_url;
   if (photo) replies.push({ photo });
-  // Then what not buying it saves, for the item type in the shopping photo (an
-  // estimate; footprint.ts). A type with no estimate still says how to undo the skip.
-  // The kind of thing they'd be buying: what the top match is (a photo can show several items).
-  replies.push(skipLine(result.matches[0]!.type) ?? `I've counted this as skipped; if you buy it anyway, text "I didn't skip it".`);
+  // Then: skip it? With what skipping a new one of the matched kind saves (an estimate; footprint.ts).
+  replies.push(skipLine(result.matches[0]!.type));
   return replies;
 }
 

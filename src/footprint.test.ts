@@ -13,8 +13,8 @@ test("replies read naturally and say they're estimates", () => {
   expect(aNew("jeans")).toBe("a new pair of jeans");
   expect(aNew("hoodie")).toBe("a new hoodie");
   expect(describeKg(16.34)).toBe("≈ 16 kg CO₂e (about 41 miles of driving)");
+  expect(skipLine("watch")).toBe(`Skip it? Reply "skip" and I'll count it, or "buying it" if you're getting it anyway.`);
   expect(skipLine("jeans")).toBe(
-    "Skip it: making a new pair of jeans emits ≈ 16 kg CO₂e (about 41 miles of driving) (estimate from Carbonfact's average for the category). I've counted this as skipped; if you buy it anyway, text \"I didn't skip it\".",
+    `Skip it? Making a new pair of jeans emits ≈ 16 kg CO₂e (about 41 miles of driving), estimated from Carbonfact's average for the category. Reply "skip" and I'll count it, or "buying it" if you're getting it anyway.`,
   );
-  expect(skipLine("watch")).toBeUndefined();
 });
