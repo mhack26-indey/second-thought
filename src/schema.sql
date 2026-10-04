@@ -146,3 +146,7 @@ alter table users add column if not exists last_checkin_ask date;  -- at most on
 -- "stop": no messages the bot starts (pings, nudges, check-ins, recaps,
 -- reminders) until they text again.
 alter table users add column if not exists paused boolean not null default false;
+
+-- Which messaging platform they use the bot on, so messages the bot starts
+-- (pings, nudges, check-ins, recaps) go out the same way.
+alter table users add column if not exists platform text not null default 'imessage';
