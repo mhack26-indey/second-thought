@@ -460,7 +460,8 @@ function fitPage({ user, outfit, linked, sameAs, closet, notice, onlyHere }: Fit
 ${FONTS}
 <style>
 ${STYLE}</style></head><body class="fit">
-<a class="back" href="${base}#fit-${outfit.id}">← Wardrobe</a>
+${tabs(user.webToken, "closet")}
+<a class="back" href="${base}#fit-${outfit.id}">← Back to your fit checks</a>
 <h1>Fit check, ${fmtDate(outfit.at)}</h1>
 ${notice ? `<p class="notice">${esc(notice)}</p>` : ""}
 ${outfit.photoUrl ? `<img class="photo" src="${esc(outfit.photoUrl)}" alt="Fit check ${fmtDate(outfit.at)}">` : ""}
@@ -552,8 +553,8 @@ const qrSvg = QRCode.toString(START_LINK, {
 });
 
 async function landingPage(): Promise<string> {
-  const feature = (paths: string, title: string, body: string, i: number) =>
-    `<li class="feature" style="--i:${i}"><i class="ico">${svg(paths, 30)}</i><div><h3>${title}</h3><p>${body}</p></div></li>`;
+  const feature = (n: string, title: string, body: string, i: number) =>
+    `<li class="feature" style="--i:${i}"><span class="num">${n}</span><h3>${title}</h3><p>${body}</p></li>`;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Second Thought · the closet that texts back</title>
@@ -562,54 +563,62 @@ ${FONTS}
 <style>
 ${TOKENS}
   * { box-sizing: border-box; }
-  body { margin: 0; font: 400 16px/1.5 var(--sans); color: var(--text); background: var(--bg); }
-  h1, h2, h3 { font-family: var(--serif); font-weight: 700; margin: 0; }
-  a { color: inherit; }
-  /* Black hero with the dot matrix, faded toward the edges. */
-  .hero { position: relative; overflow: hidden; background: var(--ink); color: var(--bg); padding: 56px 20px 64px; }
-  .hero::before { content: ""; position: absolute; inset: 0; pointer-events: none;
-    background-image: radial-gradient(rgba(161, 204, 128, .55) 1px, transparent 1px); background-size: 10px 10px;
-    -webkit-mask-image: radial-gradient(ellipse at 50% 40%, #000 30%, transparent 75%); mask-image: radial-gradient(ellipse at 50% 40%, #000 30%, transparent 75%); }
-  .split { position: relative; max-width: 960px; margin: 0 auto; display: grid; gap: 30px; align-items: center; }
-  .brand { font-family: var(--serif); font-weight: 700; font-size: 1rem; letter-spacing: .02em; color: var(--bg); margin: 0 0 15px; }
-  .hero h1 { font-size: var(--text-3xl); line-height: 1.12; color: var(--primary); animation: fade .4s ease both; }
-  .lede { font-size: 1.125rem; margin: 15px 0 30px; color: var(--bg); opacity: .9; max-width: 32ch; animation: fade .4s ease .08s both; }
-  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 14px 30px; border-radius: var(--r-pill); background: var(--primary); color: var(--neutral);
-    font-weight: 700; font-family: var(--sans); text-decoration: none; box-shadow: var(--shadow-sm); transition: transform var(--ease), background var(--ease); animation: fade .4s ease .16s both; }
-  .pill:hover { transform: scale(1.05); }
-  .pill:active { transform: scale(.95); }
-  /* The QR panel: white, rounded, like a rewards card. */
-  .qr { background: #fff; color: var(--text); border-radius: var(--r-panel); padding: 20px; box-shadow: var(--shadow-lg); text-align: center; max-width: 320px; width: 100%; justify-self: center; animation: fade .4s ease .24s both; }
-  .qr a.code { display: block; width: 100%; max-width: 230px; margin: 0 auto 10px; }
+  html { scroll-behavior: smooth; }
+  html, body { overflow-x: clip; }
+  body { margin: 0; font: 400 16px/1.5 var(--sans); color: var(--ink); background: var(--canvas); -webkit-font-smoothing: antialiased; }
+  h1, h2, h3 { margin: 0; font-weight: 500; }
+  a { color: inherit; text-underline-offset: 3px; }
+  .bar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 16px;
+    background: rgba(255,255,255,.9); -webkit-backdrop-filter: saturate(1.8) blur(14px); backdrop-filter: saturate(1.8) blur(14px); box-shadow: inset 0 -1px 0 var(--hairline-soft); view-transition-name: nav; }
+  .bar .brand { font-family: var(--display); font-size: 26px; letter-spacing: .02em; text-transform: uppercase; text-decoration: none; }
+  .bar nav { display: flex; gap: 18px; font-size: 15px; font-weight: 500; }
+  .bar nav a { text-decoration: none; color: var(--mute); transition: color .25s var(--ease); }
+  .bar nav a:hover { color: var(--ink); }
+  /* The campaign tile: black, the headline towering, one white pill. */
+  .hero { background: var(--ink); color: var(--canvas); }
+  .split { max-width: 1440px; margin: 0 auto; padding: 48px 16px 56px; display: grid; gap: 40px; align-items: end; }
+  .hero h1 { font-family: var(--display); font-weight: 400; text-transform: uppercase; font-size: 72px; line-height: .9; letter-spacing: .005em; animation: rise .7s var(--ease) both; }
+  .lede { font-size: 18px; color: var(--stone); margin: 18px 0 30px; max-width: 34ch; animation: rise .7s var(--ease) .08s both; }
+  .lede b { color: var(--canvas); font-weight: 500; }
+  .hero .pill { animation: rise .7s var(--ease) .16s both; }
+  /* The QR code on a flat white panel. */
+  .qr { background: var(--canvas); color: var(--ink); padding: 24px; width: 100%; max-width: 340px; animation: rise .7s var(--ease) .24s both; }
+  .qr h2 { font-family: var(--display); font-weight: 400; text-transform: uppercase; font-size: 32px; line-height: .95; margin-bottom: 12px; }
+  .qr a.code { display: block; width: 100%; max-width: 220px; margin: 0 0 12px; transition: transform .3s var(--ease); }
+  .qr a.code:hover { transform: scale(1.02); }
   .qr svg { display: block; width: 100%; height: auto; }
-  .qr h2 { font-size: 1.125rem; color: var(--neutral); margin: 0 0 10px; }
-  .hint { color: var(--muted); font-size: .875rem; margin: 0; }
-  .hint a { color: var(--primary-darkest); font-weight: 700; white-space: nowrap; }
+  .hint { color: var(--mute); font-size: 14px; font-weight: 500; margin: 0; }
+  .hint a { color: var(--ink); white-space: nowrap; }
   .phone { display: none; }
   @media (hover: none) and (pointer: coarse) { .desktop { display: none; } .phone { display: inline; } }
-  /* What it does: feature cards. */
-  .features { max-width: 960px; margin: 0 auto; padding: 30px 20px 56px; display: grid; gap: 15px; list-style: none; }
-  .feature { display: flex; gap: 15px; align-items: flex-start; padding: 20px; border-radius: var(--r-panel); background: var(--bg-dim); animation: fade .4s ease both; animation-delay: calc(.3s + var(--i) * 80ms); }
-  .feature .ico { flex: none; width: 56px; height: 56px; display: grid; place-items: center; border-radius: var(--r-panel); background: var(--primary-darker); color: var(--bg); }
-  .feature h3 { font-size: 1.0625rem; color: var(--neutral); margin: 2px 0 5px; }
-  .feature p { margin: 0; color: var(--text); }
-  .more { max-width: 960px; margin: -30px auto 0; padding: 0 20px 56px; }
-  .more a { color: var(--primary-darkest); font-weight: 700; }
+  /* What it does: flat soft-gray cards, numbered. */
+  .section { max-width: 1440px; margin: 0 auto; padding: var(--section) 16px 0; }
+  .section h2 { font-size: 24px; margin-bottom: 18px; }
+  .features { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
+  .feature { background: var(--cloud); padding: 24px; display: flex; flex-direction: column; gap: 8px; animation: rise .6s var(--ease) both; animation-delay: calc(.3s + var(--i) * 80ms); }
+  .feature .num { font-family: var(--display); font-size: 40px; line-height: .9; }
+  .feature h3 { font-size: 18px; }
+  .feature p { margin: 0; color: var(--charcoal); }
+  .more { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 30px 0 0; }
+  footer { max-width: 1440px; margin: var(--section) auto 0; padding: 24px 16px 40px; border-top: 1px solid var(--hairline); color: var(--mute); font-size: 12px; font-weight: 500; display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; }
+  footer a { color: var(--mute); text-decoration: none; }
+  footer a:hover { color: var(--ink); }
   @media (min-width: 760px) {
-    .hero { padding: 96px 32px; }
-    .split { grid-template-columns: 1.3fr 1fr; gap: 56px; }
-    .hero h1 { font-size: var(--text-4xl); }
+    .bar { padding: 0 32px; }
+    .split { grid-template-columns: 1.4fr 1fr; padding: 96px 32px; gap: 56px; }
+    .hero h1 { font-size: 120px; }
+    .qr { justify-self: end; }
+    .section { padding-left: 32px; padding-right: 32px; }
     .features { grid-template-columns: repeat(3, 1fr); }
-    .feature { flex-direction: column; }
-    .feature .ico { width: 64px; height: 64px; }
+    footer { padding-left: 32px; padding-right: 32px; }
   }
 </style></head><body>
+<header class="bar"><a class="brand" href="/">Second Thought</a><nav><a href="/guide">Guide</a><a href="${esc(START_LINK)}">Start</a></nav></header>
 <section class="hero"><div class="split">
   <div>
-    <p class="brand">Second Thought</p>
     <h1>Stop buying what you already own.</h1>
-    <p class="lede">The closet that texts back. Send fit checks and order screenshots; it remembers everything you own.</p>
-    <a class="pill shine" href="${esc(START_LINK)}">Text the bot <span aria-hidden="true">→</span></a>
+    <p class="lede"><b>The closet that texts back.</b> Send fit checks and order screenshots; it remembers everything you own.</p>
+    <a class="pill pill-light" href="${esc(START_LINK)}">Text the bot <span class="arrow" aria-hidden="true">→</span></a>
   </div>
   <div class="qr">
     <h2>Scan to start</h2>
@@ -617,12 +626,16 @@ ${TOKENS}
     <p class="hint"><span class="desktop">Scan with your phone camera, or text </span><span class="phone">Tap the code, or text </span><a href="${esc(START_LINK)}">${esc(BOT_NUMBER_DISPLAY)}</a></p>
   </div>
 </div></section>
-<ul class="features">
-  ${feature(STAT_ICONS.skipped, "Do I already have this?", "Send a photo of something you&rsquo;re about to buy and get back the near-duplicates already hanging in your closet.", 0)}
-  ${feature(STAT_ICONS.money, "Return before the window closes.", "Order screenshots log the deadline, and you get a nudge if you still haven&rsquo;t worn it.", 1)}
-  ${feature('<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M11 18h2"/>', "No app to install.", "It all happens in Messages.", 2)}
-</ul>
-<p class="more"><a href="/guide">See everything you can text it &rarr;</a></p>
+<section class="section">
+  <h2>What it does</h2>
+  <ul class="features">
+    ${feature("01", "Do I already have this?", "Send a photo of something you&rsquo;re about to buy and get back the near-duplicates already hanging in your closet.", 0)}
+    ${feature("02", "Return before the window closes.", "Order screenshots log the deadline, and you get a nudge if you still haven&rsquo;t worn it.", 1)}
+    ${feature("03", "No app to install.", "It all happens in Messages.", 2)}
+  </ul>
+  <div class="more"><a class="pill" href="${esc(START_LINK)}">Text the bot</a><a class="pill pill-soft" href="/guide">See everything you can text it</a></div>
+</section>
+<footer><span>Second Thought · the closet that texts back</span><span><a href="/guide">Guide</a></span></footer>
 </body></html>`;
 }
 
@@ -716,10 +729,10 @@ export function startWebServer() {
 ${FONTS}
 <style>
 ${STYLE}</style></head><body class="recap">
-<a class="back" href="/w/${user.webToken}">← Wardrobe</a>
+${tabs(user.webToken, "closet")}
 <h1>Your last 30 days</h1>
 <img src="/w/${user.webToken}/recap.png" alt="${esc(summary)}">
-<p><a href="/w/${user.webToken}/recap.png" download="second-thought-recap.png">Download the image</a></p>
+<p class="links"><a class="pill" href="/w/${user.webToken}/recap.png" download="second-thought-recap.png">Download the image</a></p>
 <pre>${esc(summary)}</pre>
 </body></html>`);
       },
