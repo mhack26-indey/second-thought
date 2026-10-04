@@ -111,3 +111,6 @@ insert into return_policies (retailer, return_days, notes, returns_url) values
   ('Shein',             30, null,                                    'https://us.shein.com/Return-Policy-a-281.html')
 on conflict (retailer) do update
   set return_days = excluded.return_days, notes = excluded.notes, returns_url = excluded.returns_url;
+
+-- Month (YYYY-MM) of the last monthly recap sent, claimed before sending.
+alter table users add column if not exists last_recap text;

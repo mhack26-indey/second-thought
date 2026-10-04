@@ -11,11 +11,15 @@ import {
   localDate,
   photoAt,
   releaseFitPing,
+  claimRecaps,
+  releaseRecap,
   db,
   releaseReminder,
   sql,
 } from "./store.ts";
 import { claimNudges, releaseNudge } from "./returns.ts";
+import { previousMonth } from "./recap.ts";
+import { recapFor } from "./recaps.ts";
 import { startWebServer } from "./web.ts";
 
 // Spectrum bridges a single agent loop to many messaging interfaces.
@@ -73,6 +77,32 @@ async function sendDueReminders() {
 const NUDGE_HOUR = 10;
 let lastNudgeDay: string | undefined;
 
+// The recap for last month goes out on the 1st from RECAP_HOUR, to users with
+// a fit check last month. Each user is claimed before sending (users.last_recap),
+// so a restart or a second worker can't send it twice.
+const RECAP_HOUR = 11;
+let lastRecapDay: string | undefined;
+
+async function sendMonthlyRecaps() {
+  const now = new Date();
+  const today = localDate(now);
+  if (now.getDate() !== 1 || now.getHours() < RECAP_HOUR || lastRecapDay === today) return;
+  const month = previousMonth(now);
+  const users = await claimRecaps(month.key, month.from, month.to);
+  lastRecapDay = today;
+  for (const userId of users) {
+    try {
+      const space = await im.space.create(await im.user(userId));
+      const { card, summary } = await recapFor(userId, month);
+      if (card) await space.send(attachment(Buffer.from(card), { name: "recap.png", mimeType: "image/png" }));
+      await space.send(summary);
+    } catch (err) {
+      await releaseRecap(userId);
+      console.error(`monthly recap for ${userId} failed`, err);
+    }
+  }
+}
+
 async function sendReturnNudges() {
   const now = new Date();
   const today = localDate(now);
@@ -97,6 +127,7 @@ async function tick() {
   try {
     await sendDueReminders();
     await sendReturnNudges();
+    await sendMonthlyRecaps();
   } catch (err) {
     console.error("scheduler tick failed", err);
   } finally {
@@ -143,6 +174,7 @@ for await (const [space, message] of app.messages) {
     // A stored photo goes out as an image; a missing one is skipped.
     const send = async (reply: Reply) => {
       if (typeof reply === "string") return void (await space.send(reply));
+      if ("image" in reply) return void (await space.send(attachment(Buffer.from(reply.image), { name: reply.name, mimeType: reply.mimeType })));
       const photo = await photoAt(reply.photo);
       if (!photo) return;
       const name = `fit-check.${photo.mimeType.split("/")[1] ?? "jpg"}`;

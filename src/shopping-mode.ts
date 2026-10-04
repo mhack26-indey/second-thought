@@ -16,7 +16,8 @@ import type { ImageInput } from "./closet/vlm.ts";
 // State is in memory: a restart only loses an open window.
 
 /** A reply is text, or a stored photo (by its /photos URL) sent as an image. */
-export type Reply = string | { photo: string };
+/** A reply: text, a stored photo (by its /photos URL), or a generated image (the recap card). */
+export type Reply = string | { photo: string } | { image: Uint8Array; name: string; mimeType: string };
 
 export interface BotReply {
   replies: Reply[]; // send now
