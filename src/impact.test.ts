@@ -9,6 +9,7 @@ import { exactMatcher } from "./ingest.ts";
 import { intakeOrder } from "./orders.ts";
 import { claimNudges, handleReturnsText } from "./returns.ts";
 import { ShoppingMode } from "./shopping-mode.ts";
+import type { ImageInput } from "./closet/vlm.ts";
 
 const jeans: ExtractedItem = {
   category: "bottom",
@@ -36,12 +37,23 @@ const noPhotos = async (): Promise<never> => {
 const answer = (id?: number): AskVision => async () => ({
   items: [{ seen: 0, matches: id ? [{ item_id: id, similarity: "near_identical" as const, reason: "same jeans" }] : [] }],
 });
-const shopping = (id?: number, at = Date.parse("2026-10-03T15:00:00")) =>
+const shoppingMode = (id?: number, at = Date.parse("2026-10-03T15:00:00")) =>
   new ShoppingMode({
     db,
     now: () => at,
     match: { extract: async () => [jeans], ask: answer(id), load: noPhotos, today: () => TODAY },
   });
+// A shopping check they answer "skip" to.
+const shopping = (id?: number, at?: number) => {
+  const mode = shoppingMode(id, at);
+  return {
+    match: async (userId: string, image: ImageInput) => {
+      const replies = await mode.match(userId, image);
+      await mode.answerSkip(userId, "skip");
+      return replies;
+    },
+  };
+};
 
 const events = () =>
   db.query<{ kind: string; amount: string | null; item_id: number; purchase_id: string | null }>(
@@ -211,4 +223,21 @@ test("several identical pieces: letting one go leaves the rest, the last one end
   expect(await letGo(db, "u1", tees.id, "trashed")).toBe(true); // the last one
   expect(await activeItems(db, "u1")).toHaveLength(0);
   expect(await letGo(db, "u1", tees.id, "sold")).toBe(false); // gone
+});
+
+test("a match only asks; skip counts it, buying it doesn't, anything else waits", async () => {
+  const owned = await insertItem(db, { ...jeans, user_id: "u1", source: "fit_check" });
+  const mode = shoppingMode(owned.id);
+  const replies = await mode.match("u1", photo);
+  expect(replies.at(-1)).toStartWith("Skip it? Making a new pair of jeans emits");
+  expect((await impactTotals(db, "u1")).skipped).toBe(0); // not yet
+
+  expect(await mode.answerSkip("u1", "what's the weather")).toBeUndefined(); // still waiting
+  expect(await mode.answerSkip("u1", "buying it")).toBe("Got it, I won't count that one.");
+  expect((await impactTotals(db, "u1")).skipped).toBe(0);
+  expect(await mode.answerSkip("u1", "skip")).toBeUndefined(); // the question's answered
+
+  await mode.match("u1", photo);
+  expect(await mode.answerSkip("u1", "skip")).toStartWith("Counted.");
+  expect((await impactTotals(db, "u1")).skipped).toBe(1);
 });

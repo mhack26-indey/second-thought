@@ -478,6 +478,8 @@ export async function handleTextMessage(user: User, text: string): Promise<BotRe
     }
     if (/^(?:no|nope|nah|cancel|never ?mind|keep it)\b/.test(t)) return { replies: ["Okay, nothing was deleted."] };
   }
+  const skipAnswer = await shopping.answerSkip(user.id, text);
+  if (skipAnswer) return { replies: [skipAnswer] };
   const linked = await linkAccounts(user, t);
   if (linked) return { replies: [linked] };
   if (DELETE_ALL.test(t)) {
