@@ -6,11 +6,12 @@ import { addItemToOutfit, deleteFitCheck, itemsOnlyIn, linkItem, mergeItems, unl
 import type { ExtractedItem } from "./closet/extract.ts";
 import { colorIn, itemFromName } from "./llm.ts";
 import { exactGroups, llmGroups, mostAlike, searchItems } from "./match.ts";
-import { aNew, describeKg, footprintOf } from "./footprint.ts";
+import { aNew, describeKg, footprintOf, isPlural } from "./footprint.ts";
+import { wearCount } from "./closet/repo.ts";
 import { last30Days } from "./recap.ts";
 import { recapFor } from "./recaps.ts";
 import { money } from "./orders.ts";
-import { type Impact, type ImpactEntry, type LetGo, impactHistory, impactSummary, letGo } from "./impact.ts";
+import { type Impact, type ImpactEntry, type LetGo, impactHistory, impactSummary, letGo, tossMessage } from "./impact.ts";
 import {
   type Item,
   type Outfit,
@@ -625,7 +626,7 @@ ${STYLE}
               returned: `Marked your ${item.description} as returned.`,
               sold: `Sold your ${item.description}${price ? ` for ${money(price)}` : ""}.`,
               donated: `Donated your ${item.description}.`,
-              trashed: `Removed your ${item.description}.`,
+              trashed: tossMessage(item.description, isPlural(item.type), item.created_at, await wearCount(db, item.id)),
             }[how] + saved;
           }
           return new Response(null, { status: 303, headers: { Location: `/w/${user.webToken}?msg=${encodeURIComponent(msg)}` } });

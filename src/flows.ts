@@ -6,11 +6,14 @@ import { addItemToOutfit, deleteFitCheck, itemsOnlyIn, linkItem, mergeItems, rel
 import { WINDOW_DAYS, worthBuying } from "./gaps.ts";
 import { type BotReply, type RecentFitCheck, ShoppingMode } from "./shopping-mode.ts";
 import { readPhoto } from "./photo-intake.ts";
+import { climateFor } from "./climate.ts";
+import { SNOOZE_DAYS, UNWORN_DAYS, findGhosts, ghostQuestion, markAsked, parseCheckinAnswer, pendingCheckin, setCheckin } from "./ghosts.ts";
 import { last30Days } from "./recap.ts";
 import { recapFor } from "./recaps.ts";
 import { handleReturnsText } from "./returns.ts";
-import { type LetGo, impactReply, impactTotals, isImpactAsk, isUnskip, letGo, parseLetGo, undoLastSkip } from "./impact.ts";
-import { describeKg, footprintOf } from "./footprint.ts";
+import { type LetGo, impactReply, impactTotals, isImpactAsk, isUnskip, letGo, parseLetGo, tossMessage, undoLastSkip } from "./impact.ts";
+import { describeKg, footprintOf, isPlural } from "./footprint.ts";
+import { wearCount } from "./closet/repo.ts";
 import { money } from "./orders.ts";
 import {
   type Item,
@@ -98,6 +101,7 @@ export const HELP = [
   '• "winter jacket is in the under-bed bin", then "where\'s my winter jacket?"',
   '• "what should I buy?" to find the gap in what you wear',
   '• "my recap" for a card of your last 30 days',
+  '• "check my closet" to find what you haven\'t been wearing',
   '• "do I have this?" then a photo, to check before you buy',
   '• "you missed my watch" or "that\'s not a blouse, it\'s a tee" to fix your last fit check',
   '• a screenshot of an order, to track its return window ("check returns" to see what to send back)',
@@ -411,6 +415,11 @@ const photoDeps = { db, shop: shopping.match.bind(shopping) };
 /** Handle a text message; "do I have this?" may answer later, after the vision model. */
 export async function handleTextMessage(user: User, text: string): Promise<BotReply> {
   if (user.step === "done") {
+    const checkin = await answerCheckin(user, text);
+    if (checkin) return { replies: [checkin] };
+    if (CHECK_CLOSET.test(text.trim().toLowerCase().replace(/[.!?]+$/, ""))) {
+      return { replies: [(await askCheckin(user, { demo: true })) ?? "Nothing's been sitting unworn in its season. Nice."] };
+    }
     const deleteAnswer = await answerDelete(user, text);
     if (deleteAnswer) return { replies: [deleteAnswer] };
     const letGoAnswer = await answerLetGo(user, text);
@@ -511,6 +520,81 @@ async function answerLetGo(user: User, text: string): Promise<string | undefined
   return letItGo(user, item, answer.how, answer.price);
 }
 
+const CHECK_CLOSET = /^(?:check|scan) (?:my )?(?:closet|wardrobe|clothes)$/;
+
+/**
+ * Asks "what happened to this?" about their most overdue in-season item, and
+ * returns the question (undefined if nothing qualifies). `demo` ("check my
+ * closet") shortens the wait to a week so the seeded closet can show it.
+ */
+export async function askCheckin(user: User, opts: { demo?: boolean } = {}): Promise<string | undefined> {
+  if (!user.city) return undefined;
+  const climate = await climateFor(db, user.city).catch((err) => {
+    console.error(`climate for ${user.city} failed`, err);
+    return undefined;
+  });
+  if (!climate) return undefined;
+  const [ghost] = await findGhosts(db, user.id, climate, new Date(), opts.demo ? 7 : UNWORN_DAYS);
+  if (!ghost) return undefined;
+  await markAsked(db, user.id, ghost.itemId);
+  return ghostQuestion(ghost, user.city);
+}
+
+/** Replies to "what happened to this?" and its follow-ups (where is it, how did it go). */
+async function answerCheckin(user: User, text: string): Promise<string | undefined> {
+  const pending = await pendingCheckin(db, user.id);
+  if (!pending) return undefined;
+  const item = (await listItems(user.id)).find((i) => i.id === pending.item_id);
+  if (!item) return undefined;
+
+  if (pending.awaiting === "location") {
+    if (fastPath(text)) return undefined; // a command, not a place
+    await setLocation(user.id, item.id, text.trim().replace(/^(?:it'?s |in |at )+/i, ""));
+    await setCheckin(db, item.id, { awaiting: null, snoozeDays: 90 });
+    return `Got it, your ${item.description} is ${text.trim().replace(/^(?:it'?s )/i, "")}. I won't ask about it for a while.`;
+  }
+  if (pending.awaiting === "let_go") {
+    if (/^(?:keep|keeping it|nevermind|never mind)\b/i.test(text.trim())) {
+      await setCheckin(db, item.id, { awaiting: null, snoozeDays: SNOOZE_DAYS });
+      return `Okay, keeping your ${item.description}.`;
+    }
+    const said = parseLetGo(text);
+    if (!said) return undefined;
+    await setCheckin(db, item.id, { awaiting: null });
+    return letItGo(user, item, said.how, said.price);
+  }
+
+  switch (parseCheckinAnswer(text)) {
+    case 1:
+      await setCheckin(db, item.id, { awaiting: null, snoozeDays: SNOOZE_DAYS });
+      return `Got it, I'll leave your ${item.description} alone for a few weeks.`;
+    case 2:
+      await setCheckin(db, item.id, { awaiting: null, occasionOnly: true });
+      return `Noted: your ${item.description} is for special occasions. I won't ask about it again.`;
+    case 3:
+      await setCheckin(db, item.id, { awaiting: "location" });
+      return `Where is it? (like "under-bed bin" or "at my mom's")`;
+    case 4: {
+      await setCheckin(db, item.id, { awaiting: "let_go" });
+      const listing = `https://www.depop.com/search/?q=${encodeURIComponent(item.description)}`;
+      return [
+        `Then someone else might love it. It's in season now, a good time to list it:`,
+        `"${capitalize(item.description)}"`,
+        `See what similar ones go for: ${listing}`,
+        `Text "sold it for $20" or "donated" once it's gone (I'll count it), or "keep" to hang on to it.`,
+      ].join("\n");
+    }
+    case 5:
+      await setCheckin(db, item.id, { awaiting: "let_go" });
+      return `Nice. Did you sell it (and for how much), donate it, or return it?`;
+    case 6:
+      await setCheckin(db, item.id, { awaiting: null });
+      return letItGo(user, item, "trashed", null);
+    default:
+      return undefined; // something else: leave the question open
+  }
+}
+
 async function letItGo(user: User, item: Item, how: LetGo, price: number | null): Promise<string> {
   if (!(await letGo(db, user.id, item.id, how, price))) return `Couldn't update your ${item.description}.`;
   const kg = footprintOf(item.type);
@@ -519,8 +603,9 @@ async function letItGo(user: User, item: Item, how: LetGo, price: number | null)
     returned: `Marked your ${item.description} as returned.`,
     sold: `Nice, sold your ${item.description}${price ? ` for ${money(price)}` : ""}.`,
     donated: `Donated your ${item.description}. Good call.`,
-    trashed: `Removed your ${item.description}.`,
+    trashed: "",
   }[how];
+  if (how === "trashed") return tossMessage(item.description, isPlural(item.type), item.created_at, await wearCount(db, item.id));
   return done + saved;
 }
 

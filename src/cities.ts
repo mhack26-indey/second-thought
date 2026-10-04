@@ -6,6 +6,9 @@
 export interface City {
   label: string; // "Ann Arbor, Michigan" / "Paris, France"
   population: number;
+  latitude?: number;
+  longitude?: number;
+  countryCode?: string; // "US"
 }
 
 export const MAX_CHOICES = 5;
@@ -57,6 +60,8 @@ interface GeoResult {
   country_code?: string;
   feature_code?: string;
   population?: number;
+  latitude?: number;
+  longitude?: number;
 }
 
 async function search(name: string): Promise<GeoResult[]> {
@@ -119,7 +124,9 @@ export async function findCities(text: string): Promise<City[]> {
     for (const r of results) {
       const l = label(r);
       const population = r.population ?? 0;
-      if ((byLabel.get(l)?.population ?? -1) < population) byLabel.set(l, { label: l, population });
+      if ((byLabel.get(l)?.population ?? -1) < population) {
+        byLabel.set(l, { label: l, population, latitude: r.latitude, longitude: r.longitude, countryCode: r.country_code });
+      }
     }
     return [...byLabel.values()].sort((a, b) => b.population - a.population).slice(0, MAX_CHOICES);
   }

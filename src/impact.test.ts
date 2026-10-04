@@ -4,7 +4,7 @@ import type { ExtractedItem } from "./closet/extract.ts";
 import { activeItems, insertItem } from "./closet/repo.ts";
 import type { Db } from "./db/client.ts";
 import { testDb } from "./db/test-db.ts";
-import { impactReply, impactSummary, impactTotals, isImpactAsk, isUnskip, letGo, parseLetGo, undoLastSkip } from "./impact.ts";
+import { impactReply, impactSummary, impactTotals, isImpactAsk, isUnskip, letGo, parseLetGo, tossMessage, undoLastSkip } from "./impact.ts";
 import { exactMatcher } from "./ingest.ts";
 import { intakeOrder } from "./orders.ts";
 import { claimNudges, handleReturnsText } from "./returns.ts";
@@ -184,4 +184,14 @@ test("how an item left, from a reply", () => {
   expect(parseLetGo("I returned it")).toEqual({ how: "returned", price: null });
   expect(parseLetGo("tossed it, it ripped")).toEqual({ how: "trashed", price: null });
   expect(parseLetGo("remind me tomorrow")).toBeUndefined();
+});
+
+test("tossing says how long it lasted: short lives get the quality note, long ones a good run", () => {
+  const now = new Date("2026-10-03T12:00:00");
+  expect(tossMessage("white sneakers", true, new Date("2026-08-22T12:00:00"), 3, now)).toBe(
+    "Removed your white sneakers. They only lasted 6 weeks and 3 wears. That's a short life for clothes; next time, sturdier pieces (or good secondhand ones) are worth paying for. Textile recycling keeps even broken clothes out of landfill.",
+  );
+  expect(tossMessage("gray hoodie", false, new Date("2023-09-01T12:00:00"), 140, now)).toBe(
+    "Removed your gray hoodie. It had a good run: 3 years and 140 wears. Textile recycling keeps even broken clothes out of landfill.",
+  );
 });
