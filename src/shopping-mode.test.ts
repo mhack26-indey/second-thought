@@ -5,7 +5,7 @@ import { activeItems, addWear, createOutfit, insertItem, wearCount } from "./clo
 import type { Db } from "./db/client.ts";
 import { testDb } from "./db/test-db.ts";
 import { ingestOutfit } from "./ingest.ts";
-import { PENDING_MS, ShoppingMode, UNDO_MS, isShoppingAsk } from "./shopping-mode.ts";
+import { PENDING_MS, ShoppingMode, UNDO_MS, isShoppingAsk, isShoppingCaption } from "./shopping-mode.ts";
 
 const jeans: ExtractedItem = {
   category: "bottom",
@@ -192,4 +192,11 @@ test("shopping asks are whole-message phrasings", () => {
   ]) {
     expect(isShoppingAsk(other)).toBe(false);
   }
+});
+
+test("photo captions that mean 'check my closet' vs a plain fit check", () => {
+  for (const c of ["do I have this?", "is this a dupe", "should i buy these", "thinking about getting this", "in the store rn, do I already own something like it"]) {
+    expect(isShoppingCaption(c)).toBe(true);
+  }
+  for (const c of ["fit check", "today's fit", "first day of class", "new haircut lol"]) expect(isShoppingCaption(c)).toBe(false);
 });

@@ -232,8 +232,13 @@ for await (const [space, message] of app.messages) {
     const user = await getUser(message.sender.id);
     if (user && user.platform !== message.platform) await setPlatform(user.id, message.platform);
     const content = message.content;
-    const isText = content.type === "text";
-    const isImage = content.type === "attachment" && content.mimeType.startsWith("image/");
+    // Telegram sends a photo with a caption as a group: the caption's text and
+    // the photo. Unpack it so the photo is handled and the caption is read.
+    const parts: any[] = content.type === "group" ? (content as any).items.map((item: any) => item.content) : [content];
+    const photo = parts.find((p) => p.type === "attachment" && p.mimeType?.startsWith("image/"));
+    const caption: string | undefined = parts.find((p) => p.type === "text")?.text;
+    const isImage = Boolean(photo);
+    const isText = !isImage && caption !== undefined;
     if (user && !isText && !isImage) continue; // nothing to answer, so no typing bubble
 
     // The typing bubble shows while the reply is worked out (the text model
@@ -260,15 +265,15 @@ for await (const [space, message] of app.messages) {
       if (!user) {
         const created = await createUser(message.sender!.id, message.platform);
         // A first message that's a link code ("link 482913") links right away instead of onboarding.
-        if (content.type === "text" && /^link\s+\d{6}$/i.test(content.text.trim())) {
-          ({ replies, later } = await handleTextMessage(created, content.text));
+        if (isText && /^link\s+\d{6}$/i.test(caption!.trim())) {
+          ({ replies, later } = await handleTextMessage(created, caption!));
         } else {
-          replies = startOnboarding(message.sender!.id, content.type === "text" ? content.text : undefined);
+          replies = startOnboarding(message.sender!.id, isText ? caption : undefined);
         }
-      } else if (content.type === "text") {
-        ({ replies, later } = await handleTextMessage(user, content.text));
-      } else if (content.type === "attachment") {
-        ({ replies, later } = await handlePhoto(user, await content.read(), content.mimeType));
+      } else if (isImage) {
+        ({ replies, later } = await handlePhoto(user, await photo.read(), photo.mimeType, caption));
+      } else if (isText) {
+        ({ replies, later } = await handleTextMessage(user, caption!));
       } else {
         return undefined;
       }
