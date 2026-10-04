@@ -1,6 +1,9 @@
 import QRCode from "qrcode";
 import { CATEGORIES, type Category } from "./closet/categories.ts";
 import { publicGuideResponse, userGuideResponse } from "./guide-page.ts";
+import { climateFor } from "./climate.ts";
+import { type LetGoPick, declutterPicks } from "./declutter.ts";
+import { AGE_RANGES, OCCASIONS, type Occasion, type ProfilePatch, saveProfile } from "./profile.ts";
 import { BOT_NUMBER_DISPLAY, CATEGORY_NAMES, FONTS, PIN, SEASONS, START_LINK, STAT_ICONS, STYLE, TOKENS, esc, icon, svg, tabs } from "./web-style.ts";
 import { cityFrom, findCities } from "./cities.ts";
 import { PORT, PUBLIC_URL } from "./config.ts";
@@ -74,6 +77,7 @@ interface PageData {
   reminders: Reminder[];
   impact: Impact;
   history: ImpactEntry[];
+  letGoPicks: LetGoPick[]; // "what should I get rid of?" (declutter.ts)
   notice?: string;
   wears: { outfitId: number; itemId: number }[];
   saved: boolean;
@@ -81,7 +85,7 @@ interface PageData {
   cityNotFound?: string;
 }
 
-function page({ user, items: allItems, outfits, reminders: pending, impact, history, notice, wears, saved, cityChoices, cityNotFound }: PageData): string {
+function page({ user, items: allItems, outfits, reminders: pending, impact, history, letGoPicks, notice, wears, saved, cityChoices, cityNotFound }: PageData): string {
   // Items link to the fit checks they were seen in, and each fit check lists
   // its items, so you can check what the vision model matched.
   const outfitById = new Map(outfits.map((o) => [o.id, o]));
@@ -228,6 +232,17 @@ ${
 </div>`
     : `<p class="empty">No items yet. Text something like "I have black straight-leg jeans".</p>`
 }
+${
+  letGoPicks.length
+    ? `<h2 id="let-go">Let go</h2><p class="sub">From what you wear and when. Text "sold 2" or "donated 2" when one's gone.</p><ul class="picks">${letGoPicks
+        .map(
+          (p, i) => `<li class="pick" style="--i:${i}"><i class="ico">${p.photoUrl ? `<img src="${esc(p.photoUrl)}" loading="lazy" alt="">` : svg(STAT_ICONS.skipped, 28)}</i>
+            <div><h3><span class="n">${i + 1}</span> ${esc(p.description)}</h3><p>${esc(p.reasons.join("; "))}.</p>
+            <p class="exit exit-${p.exit.kind}">${esc(p.exit.text)}.${p.exit.links.map((l) => ` <a href="${esc(l.url)}" rel="noopener">${esc(l.label)}</a>`).join("")}</p></div></li>`,
+        )
+        .join("")}</ul>`
+    : ""
+}
 <h2 id="fits">Fit checks</h2>
 ${photos ? `<div class="grid">${photos}</div>` : `<p class="empty">No fit checks yet. Send a photo of today's outfit.</p>`}
 <h2>Reminders</h2>
@@ -245,6 +260,18 @@ ${photos ? `<div class="grid">${photos}</div>` : `<p class="empty">No fit checks
   }
   ${cityNotFound ? `<p class="error">I couldn't find a city called "${esc(cityNotFound)}". Adding the state helps, like "Springfield, Illinois".</p>` : ""}
   <label>Daily fit check<select name="fitCheck">${hourOptions}</select></label>
+  <label>Age range<select name="ageRange"><option value="">Rather not say</option>${AGE_RANGES.map(
+    (a) => `<option value="${a}"${user.ageRange === a ? " selected" : ""}>${a.replace("-", "–")}</option>`,
+  ).join("")}</select></label>
+  <fieldset class="week"><legend>Your week</legend>${OCCASIONS.map(
+    (o) => `<label class="check"><input type="checkbox" name="occasions" value="${o}"${user.occasions?.includes(o) ? " checked" : ""}> ${o}</label>`,
+  ).join("")}</fieldset>
+  <div class="sizes">
+    <label>Top size<input name="sizeTop" value="${esc(user.sizeTop ?? "")}" maxlength="12" placeholder="M"></label>
+    <label>Bottom size<input name="sizeBottom" value="${esc(user.sizeBottom ?? "")}" maxlength="12" placeholder="32x30"></label>
+    <label>Shoe size<input name="sizeShoe" value="${esc(user.sizeShoe ?? "")}" maxlength="12" placeholder="10"></label>
+  </div>
+  <p class="empty">Used to fit suggestions to your week and put your size in shopping links. An age range only, never your age.</p>
   <button type="submit">Save</button>
 </form>
 <script>
@@ -618,6 +645,11 @@ export function startWebServer() {
           listWears(user.id),
           impactHistory(db, user.id),
         ]);
+        const climate = user.city ? await climateFor(db, user.city).catch(() => undefined) : undefined;
+        const letGoPicks = await declutterPicks(db, user.id, climate, new Date(), user).catch((err) => {
+          console.error(`let-go picks for ${user.id} failed`, err);
+          return [];
+        });
         const params = new URL(req.url).searchParams;
         const saved = params.has("saved");
         const typed = params.get("pickCity");
@@ -625,7 +657,7 @@ export function startWebServer() {
         const options = typed ? (await findCities(typed).catch(() => [])).map((c) => c.label) : [];
         const cityChoices = typed && options.length > 1 ? { typed, options } : undefined;
         const cityNotFound = params.get("cityNotFound") ?? undefined;
-        return new Response(page({ user, items, outfits, reminders, impact, history, notice: params.get("msg") ?? undefined, wears, saved, cityChoices, cityNotFound }), {
+        return new Response(page({ user, items, outfits, reminders, impact, history, letGoPicks, notice: params.get("msg") ?? undefined, wears, saved, cityChoices, cityNotFound }), {
           headers: { "Content-Type": "text/html; charset=utf-8" },
         });
       },
@@ -658,6 +690,17 @@ export function startWebServer() {
           else if (fitCheck !== "" && Number.isInteger(hour) && hour >= 0 && hour <= 23) patch.fitCheckHour = hour;
 
           await updateUser(user.id, patch);
+          // Profile details (profile.ts): blank clears a field; the week is replaced by what's checked.
+          const size = (key: string) => field(key).slice(0, 12) || null;
+          const age = field("ageRange");
+          const details: ProfilePatch = {
+            ageRange: (AGE_RANGES as readonly string[]).includes(age) ? (age as ProfilePatch["ageRange"]) : null,
+            occasions: form.getAll("occasions").map(String).filter((o): o is Occasion => (OCCASIONS as readonly string[]).includes(o)),
+            sizeTop: size("sizeTop"),
+            sizeBottom: size("sizeBottom"),
+            sizeShoe: size("sizeShoe"),
+          };
+          await saveProfile(db, user.id, details, { replaceOccasions: true });
           // Post/redirect/get so a refresh doesn't resubmit the form.
           return new Response(null, { status: 303, headers: { Location: redirect } });
         },
@@ -665,7 +708,7 @@ export function startWebServer() {
       "/w/:token/recap": async (req) => {
         const user = await getUserByToken(req.params.token);
         if (!user) return new Response("Not found", { status: 404 });
-        const { summary } = await recapFor(user.id, last30Days());
+        const { summary } = await recapFor(user.id, last30Days(), user.name);
         return html(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Recap · Second Thought</title>

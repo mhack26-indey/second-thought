@@ -11,6 +11,7 @@ import {
 } from "./closet/repo.ts";
 import { PUBLIC_URL } from "./config.ts";
 import { type Db, migrate } from "./db/client.ts";
+import { type AgeRange, type Occasion, deleteUserRows } from "./profile.ts";
 import { type Impact, impactTotals } from "./impact.ts";
 
 // Everything lives in Neon Postgres. The closet tables (items, outfits, wears)
@@ -38,7 +39,7 @@ export const db: Db = {
 await migrate(db);
 await sql.unsafe(await Bun.file(new URL("./schema.sql", import.meta.url)).text());
 
-export type Step = "city" | "city_pick" | "done";
+export type Step = "city" | "city_pick" | "profile" | "profile_again" | "done";
 
 export type { Item } from "./closet/repo.ts";
 
@@ -56,6 +57,12 @@ export interface User {
   cityOptions: string[] | null; // places to pick from while step is "city_pick"
   paused: boolean; // "stop": the bot starts nothing until they text again
   platform: string; // "imessage" | "telegram": where the bot's own messages go
+  // Optional profile details (profile.ts); null when not given.
+  ageRange: AgeRange | null;
+  occasions: Occasion[] | null;
+  sizeTop: string | null;
+  sizeBottom: string | null;
+  sizeShoe: string | null;
 }
 
 export interface Outfit {
@@ -86,6 +93,11 @@ const toUser = (r: any): User => ({
   paused: r.paused ?? false,
   platform: r.platform ?? "imessage",
   cityOptions: r.city_options ? JSON.parse(r.city_options) : null,
+  ageRange: r.age_range ?? null,
+  occasions: r.occasions ?? null,
+  sizeTop: r.size_top ?? null,
+  sizeBottom: r.size_bottom ?? null,
+  sizeShoe: r.size_shoe ?? null,
 });
 
 // ---- users ----
@@ -212,9 +224,7 @@ export async function setPaused(id: string, paused: boolean): Promise<void> {
  */
 export async function deleteUserData(id: string): Promise<void> {
   await sql.begin(async (tx) => {
-    await tx`delete from items where user_id = ${id}`;
-    await tx`delete from outfits where user_id = ${id}`;
-    await tx`delete from users where id = ${id}`;
+    await deleteUserRows({ query: async (text, params = []) => [...(await tx.unsafe(text, params as any[]))] }, id);
   });
 }
 

@@ -89,6 +89,20 @@ alter table impact_events add constraint impact_events_kind_check check (kind in
 -- there's no once-per-item index; letting go of the last one ends the item.
 drop index if exists impact_events_let_go_once;
 
+-- Profile details that make suggestions fit (asked once in onboarding, all
+-- optional, editable on the wardrobe page and by text). An age range only,
+-- never an age or birthdate, and never "under 18": that's stored as null.
+alter table users add column if not exists age_range text check (age_range in ('18-24', '25-34', '35+'));
+alter table users add column if not exists occasions text[];       -- what their week has: office, class, gym...
+alter table users add column if not exists size_top text;
+alter table users add column if not exists size_bottom text;
+alter table users add column if not exists size_shoe text;
+
+-- The last "what should I get rid of?" list (item ids, in order), so "sold 2"
+-- means its second item.
+alter table users add column if not exists declutter_list text;
+alter table users add column if not exists declutter_at timestamptz;
+
 -- Return windows for retailers students use most, in days from the order
 -- date. Standard online policy as of Oct 2026. Replies tell people to verify
 -- on the retailer's site, since policies change and vary by item and member

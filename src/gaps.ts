@@ -23,12 +23,18 @@ export const MIN_OUTFITS = 3; // fewer fit checks than this isn't a pattern
 export const WINDOW_DAYS = 90;
 
 export function worthBuying(wears: (Item & { outfit_id: number })[], groups: Groups): string {
+  return worthBuyingResult(wears, groups).text;
+}
+
+/** The answer, and whether it suggests buying anything (a missing slot) or not. */
+export function worthBuyingResult(wears: (Item & { outfit_id: number })[], groups: Groups): { text: string; buy: boolean } {
+  const no = (text: string) => ({ text, buy: false });
   const outfits = new Set(wears.map((w) => w.outfit_id)).size;
   if (outfits === 0) {
-    return "Send me a few fit checks first. I base this on what you actually wear, not just what you own.";
+    return no("Send me a few fit checks first. I base this on what you actually wear, not just what you own.");
   }
   if (outfits < MIN_OUTFITS) {
-    return `I base this on what you actually wear, and I've only seen ${outfits} fit check${outfits === 1 ? "" : "s"} lately. Send a few more and ask again.`;
+    return no(`I base this on what you actually wear, and I've only seen ${outfits} fit check${outfits === 1 ? "" : "s"} lately. Send a few more and ask again.`);
   }
 
   // Distinct items in rotation per slot.
@@ -36,7 +42,7 @@ export function worthBuying(wears: (Item & { outfit_id: number })[], groups: Gro
   for (const w of wears) worn.get(w.category as Slot)?.set(w.id, w);
   const counts = SLOTS.map((slot) => ({ slot, items: [...worn.get(slot)!.values()] })).filter((c) => c.items.length);
   if (counts.length < 2) {
-    return "Your fit checks don't show enough tops, bottoms and shoes to compare yet. Full-length photos help.";
+    return no("Your fit checks don't show enough tops, bottoms and shoes to compare yet. Full-length photos help.");
   }
 
   counts.sort((a, b) => a.items.length - b.items.length);
@@ -47,7 +53,7 @@ export function worthBuying(wears: (Item & { outfit_id: number })[], groups: Gro
       const c = counts.find((c) => c.slot === s);
       return c ? [name(s, c.items.length)] : [];
     });
-    return `Nothing's holding your closet back: you rotate ${list.join(", ")}. The most sustainable buy right now is nothing.`;
+    return no(`Nothing's holding your closet back: you rotate ${list.join(", ")}. The most sustainable buy right now is nothing.`);
   }
 
   // One more piece in the low slot makes a new outfit with every combination
@@ -58,8 +64,9 @@ export function worthBuying(wears: (Item & { outfit_id: number })[], groups: Gro
   const one = NAMES[low.slot][0];
   const same = low.items.length === 1 ? `the same ${one}` : `the same ${name(low.slot, low.items.length)}`;
 
-  return [
+  const text = [
     `You wear ${name(high.slot, high.items.length)} with ${same}.`,
     `${color ? `A ${color} ${one}` : `Another ${one}`} would go with all of them: ${combos} new outfit${combos === 1 ? "" : "s"}.`,
   ].join(" ");
+  return { text, buy: true };
 }

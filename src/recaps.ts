@@ -6,7 +6,7 @@ import { db, photoAt } from "./store.ts";
 // text. Used by "my recap", the monthly send, and the wardrobe page.
 
 /** The recap card (PNG) and its text for a period; the card is skipped if it can't be drawn. */
-export async function recapFor(userId: string, period: { from: string; to: string; title: string }) {
+export async function recapFor(userId: string, period: { from: string; to: string; title: string }, name?: string | null) {
   const recap = await buildRecap(db, userId, period.from, period.to, period.title);
   let card: Uint8Array | undefined;
   try {
@@ -20,6 +20,6 @@ export async function recapFor(userId: string, period: { from: string; to: strin
   } catch (err) {
     console.error(`recap card for ${userId} failed`, err);
   }
-  return { card, summary: recapText(recap) };
+  return { card, summary: name ? `Here's your recap, ${name}.\n${recapText(recap)}` : recapText(recap) };
 }
 
