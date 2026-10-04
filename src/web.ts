@@ -571,7 +571,7 @@ ${TOKENS}
   /* The QR code on a flat white panel. */
   .qr { background: var(--canvas); color: var(--ink); padding: 24px; width: 100%; max-width: 340px; animation: rise .7s var(--ease) .24s both; }
   .qr h2 { font-family: var(--display); font-weight: 400; text-transform: uppercase; font-size: 32px; line-height: .95; margin-bottom: 12px; }
-  .qr a.code { display: block; width: 100%; max-width: 220px; margin: 0 0 12px; transition: transform .3s var(--ease); }
+  .qr a.code { display: block; width: 100%; max-width: 220px; margin: 0 auto 12px; transition: transform .3s var(--ease); }
   .qr a.code:hover { transform: scale(1.02); }
   .qr svg { display: block; width: 100%; height: auto; }
   .hint { color: var(--mute); font-size: 14px; font-weight: 500; margin: 0; }
