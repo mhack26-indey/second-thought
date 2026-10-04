@@ -151,7 +151,7 @@ export async function recapPng(r: Recap, photos: Record<string, CardPhoto> = {})
 
   const card = h(
     "div",
-    { width: W, height: H, background: C.bg, color: C.ink, fontFamily: "Inter", flexDirection: "column", padding: "64px 80px", gap: 36 },
+    { width: W, height: H, background: C.bg, color: C.ink, fontFamily: "Inter", flexDirection: "column", padding: "60px 80px 56px", gap: 30 },
     h(
       "div",
       { justifyContent: "space-between", alignItems: "center" },
@@ -164,8 +164,9 @@ export async function recapPng(r: Recap, photos: Record<string, CardPhoto> = {})
     ghosts ?? fresh,
     h(
       "div",
-      { flexDirection: "column", marginTop: "auto", borderTop: `2px solid ${C.line}`, paddingTop: 28 },
-      text("The most sustainable clothes are the ones you already own.", { fontSize: 30, fontWeight: 600 }),
+      { flexDirection: "column", marginTop: "auto", borderTop: `2px solid ${C.line}`, paddingTop: 22 },
+      text("“The most sustainable garment is the one already in your wardrobe.”", { fontSize: 28, fontWeight: 600, lineHeight: 1.3 }),
+      text("— Orsola de Castro, co-founder of Fashion Revolution", { fontSize: 22, color: C.muted, marginTop: 8 }),
       text("CO₂ is an estimate: Carbonfact category averages; driving from the EPA.", { fontSize: 20, color: C.muted, marginTop: 10 }),
     ),
   );
