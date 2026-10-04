@@ -165,7 +165,7 @@ export async function recapPng(r: Recap, photos: Record<string, CardPhoto> = {})
     h(
       "div",
       { flexDirection: "column", marginTop: "auto", borderTop: `2px solid ${C.line}`, paddingTop: 22 },
-      text("“The most sustainable garment is the one already in your wardrobe.”", { fontSize: 28, fontWeight: 600, lineHeight: 1.3 }),
+      text("“The most sustainable garment is the one already in your wardrobe.”", { fontSize: 24, fontWeight: 600 }),
       text("— Orsola de Castro, co-founder of Fashion Revolution", { fontSize: 22, color: C.muted, marginTop: 8 }),
       text("CO₂ is an estimate: Carbonfact category averages; driving from the EPA.", { fontSize: 20, color: C.muted, marginTop: 10 }),
     ),
