@@ -20,7 +20,7 @@ Go with Sustainability as the main track. The core of the product is not buying 
 
 | Track | Decision | Why |
 |---|---|---|
-| Sustainability (main) | Yes | The most sustainable clothes are the ones you already own |
+| Sustainability (main) | Yes | "The most sustainable garment is the one already in your wardrobe" (Orsola de Castro, co-founder of Fashion Revolution) |
 | Judged by an LLM (fun) | Yes | Vision extraction, vision-model matching, and gap logic are technically strong; a clear README matters most here |
 | Photon | Yes, core | The whole product lives in iMessage; 1st place also fast-tracks to Photon's final interview |
 | Neon | Yes | One Postgres database holds the closet, wears, and purchases; a Neon branch keeps the seeded demo data safe |
@@ -147,7 +147,7 @@ The demo runs about 2 minutes and ends on the impact number.
 3. **Shopping (30 sec):** text a photo of black pants. The bot replies with your near-identical pair and notes they're still returnable.
 4. **Returns (30 sec):** text an order screenshot for a jacket. Fast-forward: "You haven't worn this jacket. Return by Friday?" Reply "return" and get the drop-off info.
 5. **Worth buying (15 sec):** "What should I actually buy?" The bot names the bottleneck category.
-6. **Close (15 sec):** the counter: purchases avoided and money saved. "The most sustainable clothes are the ones you already own."
+6. **Close (15 sec):** the counter: purchases avoided and money saved. "As Orsola de Castro, co-founder of Fashion Revolution, puts it: the most sustainable garment is the one already in your wardrobe."
 
 If the live iMessage demo fails, switch to the backup video without apologizing.
 
