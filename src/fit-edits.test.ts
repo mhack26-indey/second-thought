@@ -3,7 +3,7 @@ import type { ExtractedItem } from "./closet/extract.ts";
 import { activeItems, addWear, createOutfit, insertItem, wearCount } from "./closet/repo.ts";
 import type { Db } from "./db/client.ts";
 import { testDb } from "./db/test-db.ts";
-import { addItemToOutfit, linkItem, mergeItems, unlinkItem } from "./fit-edits.ts";
+import { addItemToOutfit, deleteFitCheck, itemsOnlyIn, linkItem, mergeItems, unlinkItem } from "./fit-edits.ts";
 
 const sweats: ExtractedItem = {
   category: "bottom",
@@ -83,4 +83,24 @@ test("link and add only touch the user's own items and photos", async () => {
   expect(added.source).toBe("fit_check");
   expect(added.photo_url).toBe("p/a");
   expect(await wearCount(db, added.id)).toBe(1);
+});
+
+test("deleting a fit check removes what only it added and keeps the rest", async () => {
+  const [a, b] = [await fit("p/a"), await fit("p/b")];
+  const onlyHere = await insertItem(db, { ...sweats, description: "red beanie", user_id: "u1", source: "fit_check", photo_url: "p/b" });
+  const seenBefore = await insertItem(db, { ...sweats, user_id: "u1", source: "fit_check", photo_url: "p/a" });
+  const texted = await insertItem(db, { ...sweats, description: "black jeans", user_id: "u1", source: "text" });
+  await addWear(db, onlyHere.id, b.id);
+  await addWear(db, seenBefore.id, a.id);
+  await addWear(db, seenBefore.id, b.id);
+  await addWear(db, texted.id, b.id);
+
+  expect(await itemsOnlyIn(db, "u1", b.id)).toEqual(["red beanie"]);
+  expect(await deleteFitCheck(db, "u2", b.id)).toBeUndefined(); // not theirs
+  expect(await deleteFitCheck(db, "u1", b.id)).toEqual(["red beanie"]);
+
+  expect((await activeItems(db, "u1")).map((i) => i.description).sort()).toEqual(["black jeans", "grey puma sweatpants"]);
+  expect(await wearCount(db, seenBefore.id)).toBe(1);
+  expect(await wearCount(db, texted.id)).toBe(0);
+  expect(await deleteFitCheck(db, "u1", b.id)).toBeUndefined(); // already gone
 });
