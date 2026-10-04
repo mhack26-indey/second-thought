@@ -114,3 +114,29 @@ on conflict (retailer) do update
 
 -- Month (YYYY-MM) of the last monthly recap sent, claimed before sending.
 alter table users add column if not exists last_recap text;
+
+-- A city's climate: average daily high and low (°C) for each month over the
+-- last 10 full years (Open-Meteo's weather archive), fetched once per city.
+-- Decides which months each item is "in season" there (seasons.ts).
+create table if not exists city_climate (
+  city         text primary key,   -- users.city, e.g. "Ann Arbor, Michigan"
+  country_code text,
+  latitude     double precision not null,
+  longitude    double precision not null,
+  highs_c      text not null,       -- JSON array of 12 monthly averages, Jan first
+  lows_c       text not null,
+  fetched_at   timestamptz not null default now()
+);
+
+-- "What happened to this?" about items that haven't been worn in their season
+-- (ghosts.ts). One row per item that's been asked about or answered.
+create table if not exists item_checkins (
+  item_id       integer primary key,
+  user_id       text not null references users (id) on delete cascade,
+  asked_at      timestamptz,         -- the last time the bot asked about it
+  awaiting      text,                -- 'answer' | 'location' | 'let_go': what reply the bot is waiting for
+  snooze_until  date,                -- don't ask again before this
+  occasion_only boolean not null default false  -- "only for special occasions": never ask
+);
+create index if not exists item_checkins_user on item_checkins (user_id);
+alter table users add column if not exists last_checkin_ask date;  -- at most one question a week

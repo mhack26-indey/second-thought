@@ -149,6 +149,16 @@ export async function claimRecaps(month: string, from: string, to: string): Prom
   return rows.map((r: any) => r.id);
 }
 
+/** Users not asked "what happened to this?" in the last week; claims today for them. */
+export async function claimCheckinUsers(today: string): Promise<string[]> {
+  const rows = await sql`
+    update users set last_checkin_ask = ${today}::date
+    where step = 'done' and city is not null
+      and (last_checkin_ask is null or last_checkin_ask <= ${today}::date - 7)
+    returning id`;
+  return rows.map((r: any) => r.id);
+}
+
 export async function releaseRecap(id: string): Promise<void> {
   await sql`update users set last_recap = null where id = ${id}`;
 }

@@ -12,6 +12,7 @@ import {
   photoAt,
   releaseFitPing,
   claimRecaps,
+  claimCheckinUsers,
   releaseRecap,
   db,
   releaseReminder,
@@ -20,6 +21,7 @@ import {
 import { claimNudges, releaseNudge } from "./returns.ts";
 import { previousMonth } from "./recap.ts";
 import { recapFor } from "./recaps.ts";
+import { askCheckin } from "./flows.ts";
 import { startWebServer } from "./web.ts";
 
 // Spectrum bridges a single agent loop to many messaging interfaces.
@@ -103,6 +105,28 @@ async function sendMonthlyRecaps() {
   }
 }
 
+// "What happened to this?": once a day from CHECKIN_HOUR, each user who
+// hasn't been asked in a week gets asked about their most overdue item, if
+// any. The user is claimed (users.last_checkin_ask) right before sending.
+const CHECKIN_HOUR = 12;
+let lastCheckinDay: string | undefined;
+
+async function sendCheckins() {
+  const now = new Date();
+  const today = localDate(now);
+  if (now.getHours() < CHECKIN_HOUR || lastCheckinDay === today) return;
+  lastCheckinDay = today;
+  for (const userId of await claimCheckinUsers(today)) {
+    try {
+      const user = await getUser(userId);
+      const question = user && (await askCheckin(user));
+      if (question) await sendTo(userId, question);
+    } catch (err) {
+      console.error(`closet check-in for ${userId} failed`, err);
+    }
+  }
+}
+
 async function sendReturnNudges() {
   const now = new Date();
   const today = localDate(now);
@@ -128,6 +152,7 @@ async function tick() {
     await sendDueReminders();
     await sendReturnNudges();
     await sendMonthlyRecaps();
+    await sendCheckins();
   } catch (err) {
     console.error("scheduler tick failed", err);
   } finally {

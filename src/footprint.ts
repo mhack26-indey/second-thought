@@ -74,6 +74,11 @@ export function describeKg(kg: number): string {
 
 const PAIRS = new Set(["jeans", "pants", "sweatpants", "leggings", "shorts", "sneakers", "boots", "heels", "sandals", "flats", "loafers", "slides", "sunglasses", "earrings"]);
 
+/** Pairs and plural-named items ("jeans", "sneakers") take plural verbs. */
+export function isPlural(type: string): boolean {
+  return PAIRS.has(type);
+}
+
 /** "a new pair of jeans", "a new hoodie" */
 export function aNew(type: string): string {
   return PAIRS.has(type) ? `a new pair of ${type}` : `a new ${type}`;

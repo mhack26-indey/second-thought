@@ -128,8 +128,26 @@ export function parseLetGo(text: string): { how: LetGo; price: number | null } |
   if (/\b(sold|sell|depop|poshmark|ebay|vinted)\b/.test(t)) return { how: "sold", price };
   if (/\b(donat\w*|gave (?:it )?away|goodwill|thrift|gave it to)\b/.test(t)) return { how: "donated", price: null };
   if (/\b(return\w*|sent (?:it )?back)\b/.test(t)) return { how: "returned", price: null };
-  if (/\b(threw|throw|thrown|trash\w*|toss\w*|garbage|binned|bin|ripped|broke|worn out)\b/.test(t)) return { how: "trashed", price: null };
+  if (/\b(threw|throw|thrown|trash\w*|toss\w*|garbage|binned|bin|ripped|torn|broke|broken|holes?|fell apart|worn out)\b/.test(t)) return { how: "trashed", price: null };
   return undefined;
+}
+
+/**
+ * What to say when an item is thrown away or broke: how long it lasted. A
+ * piece that didn't make it a year is a sign to buy sturdier next time, and
+ * the reply says so plainly; one that did had a good run.
+ */
+export function tossMessage(description: string, plural: boolean, since: Date, wears: number, now = new Date()): string {
+  const days = Math.max(1, Math.round((now.getTime() - since.getTime()) / 86_400_000));
+  const span =
+    days >= 730 ? `${Math.floor(days / 365)} years` : days >= 60 ? `${Math.round(days / 30)} months` : days >= 14 ? `${Math.round(days / 7)} weeks` : `${days} day${days === 1 ? "" : "s"}`;
+  const they = plural ? "They" : "It";
+  const wore = `${wears} wear${wears === 1 ? "" : "s"}`;
+  const life =
+    days < 365
+      ? `${they} only lasted ${span} and ${wore}. That's a short life for clothes; next time, sturdier pieces (or good secondhand ones) are worth paying for.`
+      : `${they} had a good run: ${span} and ${wore}.`;
+  return `Removed your ${description}. ${life} Textile recycling keeps even broken clothes out of landfill.`;
 }
 
 /**
