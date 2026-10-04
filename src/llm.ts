@@ -89,6 +89,7 @@ export type Action =
   | { action: "fit_not_there"; name: string }
   | { action: "delete_fit_check" }
   | { action: "item_count"; name: string }
+  | { action: "last_worn"; name: string }
   | { action: "show_profile" }
   | { action: "update_profile"; city?: string; name?: string }
   | { action: "help" }

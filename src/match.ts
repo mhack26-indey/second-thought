@@ -232,6 +232,11 @@ export async function findItemByName(name: string, items: Item[]): Promise<Item 
     });
   }
   if (!pool.length) return undefined;
+  // Settled without the model: their exact name, or the one item of the type they named.
+  // (Asked to pick from one exact match, the model sometimes said "none".)
+  const exact = pool.find((i) => i.description.toLowerCase() === name.trim().toLowerCase());
+  if (exact) return exact;
+  if (pool.length === 1 && type && pool[0]!.type === type) return pool[0];
   items = pool;
   const { id } = await llmJson(
     FindSchema,
