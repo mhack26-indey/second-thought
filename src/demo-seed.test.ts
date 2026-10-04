@@ -77,7 +77,7 @@ test("photos are read and deduped like live fit checks", async () => {
   expect(result.stored).toBe("red quilted puffer jacket");
   expect(items.find((i) => i.location)).toMatchObject({ description: "red quilted puffer jacket", location: "under-bed bin" });
   expect(result.skipped).toBe("navy short-sleeve polo");
-  expect(await impactTotals(db, DEMO)).toEqual({ skipped: 1, recovered: 0 });
+  expect(await impactTotals(db, DEMO)).toMatchObject({ skipped: 1, recovered: 0, co2Kg: 11.98 }); // a polo (footprint.ts)
 
   // Only "check returns" reaches the jacket: its window closes in 5 days.
   expect(await claimNudges(db, { today, userId: DEMO })).toEqual([]);

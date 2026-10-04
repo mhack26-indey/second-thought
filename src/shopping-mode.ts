@@ -1,4 +1,5 @@
 import type { Db } from "./db/client.ts";
+import { skipLine } from "./footprint.ts";
 import { formatDay } from "./closet/dates.ts";
 import type { ExtractedItem } from "./closet/extract.ts";
 import { deleteOutfit } from "./closet/repo.ts";
@@ -130,6 +131,9 @@ export function shoppingReplies(result: ShoppingResult, now = new Date()): Reply
   const replies: Reply[] = [[`You already have ${result.matches.length} like this:`, ...lines].join("\n")];
   const photo = result.matches[0]!.photo_url;
   if (photo) replies.push({ photo });
+  // Then what not buying it saves, for the item type in the shopping photo (an estimate; footprint.ts).
+  const skip = skipLine(result.seen[0]!.type);
+  if (skip) replies.push(skip);
   return replies;
 }
 

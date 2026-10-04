@@ -78,6 +78,7 @@ test("text then photo: the ask waits for the photo, which is matched and not sav
   expect(replies).toEqual([
     `You already have 1 like this:\n• black straight-leg denim jeans: same wash and cut (since ${since})`,
     { photo: "https://example.test/photos/older" },
+    "Skip it: making a new pair of jeans emits ≈ 16 kg CO₂e (about 41 miles of driving). Estimate from Carbonfact's average for the category.",
   ]);
   expect(await activeItems(db, "u1")).toHaveLength(1);
   expect(await outfitCount()).toBe(1);

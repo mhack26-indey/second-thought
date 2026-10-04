@@ -1,9 +1,11 @@
 import type { Db } from "./db/client.ts";
+import { describeKg, footprintOf } from "./footprint.ts";
 import { money } from "./orders.ts";
 
 // The impact counter: purchases skipped because a shopping check found
-// something they already own, and money back from returns. Only what actually
-// happened; no estimated CO₂ or water numbers.
+// something they already own, and money back from returns. Counts and money
+// are what actually happened; the CO₂ is an estimate per item type
+// (footprint.ts, Carbonfact category averages) and is always labeled as one.
 
 /**
  * A shopping check matched `itemId`; the amount is that item's order price,
@@ -42,6 +44,25 @@ export async function recordRecovered(db: Db, purchaseId: string): Promise<void>
 export interface Impact {
   skipped: number; // shopping checks that found a match
   recovered: number; // dollars back from returns
+  co2Kg: number; // estimated, for skipped purchases of item types with a known footprint
+}
+
+/** One skipped purchase, for "Here's what you skipped". */
+export interface Skipped {
+  at: Date;
+  description: string; // the owned item the shopping check matched
+  type: string;
+  co2Kg: number | null;
+}
+
+export async function skippedPurchases(db: Db, userId: string): Promise<Skipped[]> {
+  const rows = await db.query<{ created_at: Date; description: string; type: string }>(
+    `SELECT e.created_at, i.description, i.type
+     FROM impact_events e JOIN items i ON i.id = e.item_id
+     WHERE e.user_id = $1 AND e.kind = 'avoided' ORDER BY e.created_at DESC`,
+    [userId],
+  );
+  return rows.map((r) => ({ at: r.created_at, description: r.description, type: r.type, co2Kg: footprintOf(r.type) }));
 }
 
 export async function impactTotals(db: Db, userId: string): Promise<Impact> {
@@ -51,7 +72,8 @@ export async function impactTotals(db: Db, userId: string): Promise<Impact> {
      FROM impact_events WHERE user_id = $1`,
     [userId],
   );
-  return { skipped: row!.skipped, recovered: Number(row!.recovered) };
+  const co2Kg = (await skippedPurchases(db, userId)).reduce((sum, s) => sum + (s.co2Kg ?? 0), 0);
+  return { skipped: row!.skipped, recovered: Number(row!.recovered), co2Kg };
 }
 
 const IMPACT_ASK = /^(?:what'?s |show )?(?:my )?(?:impact|stats)$|^how am i doing$/;
@@ -62,14 +84,23 @@ export function isImpactAsk(text: string): boolean {
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-/** "Skipped 2 purchases · $49.90 back" for the wardrobe page. */
-export function impactSummary({ skipped, recovered }: Impact): string {
-  return `Skipped ${plural(skipped, "purchase", "purchases")} · ${money(recovered)} back`;
+/** "Skipped 2 purchases · ≈ 35 kg CO₂e saved · $49.90 back" for the wardrobe page; zeros are left out. */
+export function impactSummary({ skipped, recovered, co2Kg }: Impact): string {
+  if (skipped === 0 && recovered === 0) return "Nothing skipped yet";
+  const parts = [`Skipped ${plural(skipped, "purchase", "purchases")}`];
+  if (co2Kg > 0) parts.push(`≈ ${Math.round(co2Kg)} kg CO₂e saved`);
+  if (recovered > 0) parts.push(`${money(recovered)} back`);
+  return parts.join(" · ");
 }
 
-export function impactReply({ skipped, recovered }: Impact): string {
+export function impactReply({ skipped, recovered, co2Kg }: Impact): string {
   if (skipped === 0 && recovered === 0) return "Nothing yet. Text 'do I have this?' next time you're shopping.";
-  const lines = [`You've skipped ${plural(skipped, "purchase", "purchases")} and gotten ${money(recovered)} back.`];
+  const lines = [
+    recovered > 0
+      ? `You've skipped ${plural(skipped, "purchase", "purchases")} and gotten ${money(recovered)} back.`
+      : `You've skipped ${plural(skipped, "purchase", "purchases")}.`,
+  ];
+  if (co2Kg > 0) lines.push(`Not making ${skipped === 1 ? "it" : "those"} saved ${describeKg(co2Kg)}. That's an estimate from Carbonfact's averages per item type.`);
   if (skipped > 0) lines.push(`That's ${plural(skipped, "fewer thing", "fewer things")} in your closet you didn't need.`);
   return lines.join("\n");
 }

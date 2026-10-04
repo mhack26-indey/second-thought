@@ -6,7 +6,8 @@ import { addItemToOutfit, linkItem, mergeItems, unlinkItem } from "./fit-edits.t
 import type { ExtractedItem } from "./closet/extract.ts";
 import { colorIn, itemFromName } from "./llm.ts";
 import { exactGroups, llmGroups, mostAlike, searchItems } from "./match.ts";
-import { type Impact, impactSummary } from "./impact.ts";
+import { aNew, describeKg } from "./footprint.ts";
+import { type Impact, type Skipped, impactSummary, skippedPurchases } from "./impact.ts";
 import {
   type Item,
   type Outfit,
@@ -95,6 +96,10 @@ const STYLE = `  :root { color-scheme: light dark; --muted: #888; --line: #8883;
   button { background: CanvasText; color: Canvas; border: 0; font-weight: 600; cursor: pointer; }
   .saved { color: #2a9d5c; font-size: 14px; margin: 0; }
   .error { color: #d1495b; font-size: 14px; margin: 0; }
+  .skipped summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+  .skipped li small { display: block; }
+  .skipped .note { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+  .skipped .note a { color: inherit; }
   .edit { font-size: 12px; color: var(--muted); }
   .fit img.photo { aspect-ratio: auto; max-height: 70vh; object-fit: contain; background: transparent; }
   .fit li { align-items: center; flex-wrap: wrap; }
@@ -124,13 +129,14 @@ interface PageData {
   outfits: Outfit[];
   reminders: Reminder[];
   impact: Impact;
+  skipped: Skipped[];
   wears: { outfitId: number; itemId: number }[];
   saved: boolean;
   cityChoices?: { typed: string; options: string[] }; // several places matched what they typed
   cityNotFound?: string;
 }
 
-function page({ user, items: allItems, outfits, reminders: pending, impact, wears, saved, cityChoices, cityNotFound }: PageData): string {
+function page({ user, items: allItems, outfits, reminders: pending, impact, skipped, wears, saved, cityChoices, cityNotFound }: PageData): string {
   // Items link to the fit checks they were seen in, and each fit check lists
   // its items, so you can check what the vision model matched.
   const outfitById = new Map(outfits.map((o) => [o.id, o]));
@@ -194,6 +200,16 @@ function page({ user, items: allItems, outfits, reminders: pending, impact, wear
 ${STYLE}</style></head><body>
 <h1>${user.name ? `${esc(user.name)}'s` : "Your"} wardrobe</h1>
 <p class="impact">${impactSummary(impact)}</p>
+${
+  skipped.length
+    ? `<details class="skipped"><summary>Here's what you skipped</summary><ul>${skipped
+        .map(
+          (k) =>
+            `<li><span>${esc(aNew(k.type))}, like your ${esc(k.description)}${k.co2Kg === null ? "" : ` <small>${describeKg(k.co2Kg)}</small>`}</span><time>${fmtDate(k.at.getTime())}</time></li>`,
+        )
+        .join("")}</ul><p class="note">CO₂ figures are estimates for making a new item of that type, from <a href="https://www.carbonfact.com/carbon-footprint">Carbonfact's category averages</a>; driving comparison from the <a href="https://www.epa.gov/greenvehicles/greenhouse-gas-emissions-typical-passenger-vehicle">EPA</a>.</p></details>`
+    : ""
+}
 <p class="sub">${plural(allItems.length, "item")} · ${plural(outfits.length, "fit check")}${user.city ? ` · ${esc(user.city)}` : ""}</p>
 ${sections || `<p class="empty">No items yet. Text something like "I have black straight-leg jeans".</p>`}
 <h2>Fit checks</h2>
@@ -474,12 +490,13 @@ export function startWebServer() {
       "/w/:token": async (req) => {
         const user = await getUserByToken(req.params.token);
         if (!user) return new Response("Not found", { status: 404 });
-        const [items, outfits, reminders, impact, wears] = await Promise.all([
+        const [items, outfits, reminders, impact, wears, skipped] = await Promise.all([
           listItems(user.id),
           listOutfits(user.id),
           pendingReminders(user.id),
           impactFor(user.id),
           listWears(user.id),
+          skippedPurchases(db, user.id),
         ]);
         const params = new URL(req.url).searchParams;
         const saved = params.has("saved");
@@ -488,7 +505,7 @@ export function startWebServer() {
         const options = typed ? (await findCities(typed).catch(() => [])).map((c) => c.label) : [];
         const cityChoices = typed && options.length > 1 ? { typed, options } : undefined;
         const cityNotFound = params.get("cityNotFound") ?? undefined;
-        return new Response(page({ user, items, outfits, reminders, impact, wears, saved, cityChoices, cityNotFound }), {
+        return new Response(page({ user, items, outfits, reminders, impact, skipped, wears, saved, cityChoices, cityNotFound }), {
           headers: { "Content-Type": "text/html; charset=utf-8" },
         });
       },
