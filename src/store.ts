@@ -164,6 +164,36 @@ export async function claimCheckinUsers(today: string): Promise<string[]> {
 }
 
 /** "stop": hold everything the bot would start; any message they send turns it back on. */
+/**
+ * Moves everything from one account into another (linking iMessage and
+ * Telegram): the closet, fit checks and photos, reminders, purchases, impact
+ * and check-ins. The target keeps its id and platform, takes the source's
+ * profile and wardrobe link, and the source account is removed. One
+ * transaction: all of it moves or none of it does.
+ */
+export async function mergeUsers(fromId: string, toId: string): Promise<{ items: number; fitChecks: number }> {
+  return sql.begin(async (tx) => {
+    const [from] = await tx`select * from users where id = ${fromId} for update`;
+    if (!from || fromId === toId) throw new Error("nothing to link");
+    const [counts] = await tx`
+      select (select coalesce(sum(quantity), 0)::int from items where user_id = ${fromId} and status = 'active') as items,
+             (select count(*)::int from outfits where user_id = ${fromId}) as fit_checks`;
+    for (const table of ["items", "outfits", "photos", "reminders", "purchases", "impact_events", "item_checkins"]) {
+      await tx.unsafe(`update ${table} set user_id = $2 where user_id = $1`, [fromId, toId]);
+    }
+    await tx`
+      update users set step = 'done',
+        name = coalesce(name, ${from.name}), city = coalesce(city, ${from.city}),
+        fit_check_hour = ${from.fit_check_hour}, last_fit_photo = ${from.last_fit_photo},
+        last_recap = ${from.last_recap}, last_checkin_ask = ${from.last_checkin_ask}, city_options = null
+      where id = ${toId}`;
+    // The wardrobe link moves too: free it from the old account first (it's unique).
+    await tx`delete from users where id = ${fromId}`;
+    await tx`update users set web_token = ${from.web_token} where id = ${toId}`;
+    return { items: counts.items, fitChecks: counts.fit_checks };
+  });
+}
+
 export async function setPlatform(id: string, platform: string): Promise<void> {
   await sql`update users set platform = ${platform} where id = ${id}`;
 }
