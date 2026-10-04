@@ -108,6 +108,23 @@ const STYLE = `  :root { color-scheme: light dark; --muted: #888; --line: #8883;
   .skipped summary { cursor: pointer; color: var(--muted); font-size: 14px; }
   .right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
   .count { color: var(--accent, #2f6b4f); font-weight: 700; }
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 8px 0 28px; }
+  .tile { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    border: 1px solid var(--line); border-radius: 20px; background: color-mix(in srgb, CanvasText 4%, Canvas); color: inherit;
+    font: inherit; font-weight: 600; cursor: pointer; padding: 8px; }
+  .tile:hover { background: color-mix(in srgb, CanvasText 9%, Canvas); }
+  .tile small { color: var(--muted); font-weight: normal; }
+  .closet-head { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin: 8px 0 4px; }
+  .closet-head h2 { font-size: 22px; text-transform: none; letter-spacing: 0; color: inherit; margin: 0; }
+  .back { background: transparent; color: var(--muted); border: 0; padding: 0; font-weight: normal; font-size: 14px; cursor: pointer; }
+  /* With JavaScript: tiles first, one category at a time. Without it, every list shows. */
+  .js .closet { display: none; }
+  .js.open .tiles { display: none; }
+  .js.open .closet { display: block; }
+  .js .catlist { display: none; }
+  .js .catlist.shown { display: block; }
+  .js .closet.one .catlist h2 { display: none; }
+  @media (min-width: 520px) { .tiles { grid-template-columns: repeat(4, 1fr); } }
   .letgo summary { cursor: pointer; color: var(--muted); font-size: 12px; list-style: none; }
   .letgo summary::-webkit-details-marker { display: none; }
   .letgo form { display: grid; gap: 6px; margin-top: 6px; min-width: 170px; }
@@ -141,6 +158,20 @@ const STYLE = `  :root { color-scheme: light dark; --muted: #888; --line: #8883;
   .notice { padding: 10px 12px; border-radius: 8px; background: #2a9d5c22; margin: 0 0 16px; }
   .back { color: inherit; display: inline-block; margin-bottom: 12px; }
 `;
+
+// Category icons: simple line drawings (24×24, drawn in the text color).
+const ICONS: Record<Category | "all", string> = {
+  top: '<path d="M8 3 4 6l2 4 2-1v12h8V9l2 1 2-4-4-3c-.5 1.5-2 2.5-4 2.5S8.5 4.5 8 3Z"/>',
+  bottom: '<path d="M7 3h10l1 18h-4.5L12 10l-1.5 11H6L7 3Z"/><path d="M7 6h10"/>',
+  dress: '<path d="M9 3h6l-1 5 4 13H6l4-13-1-5Z"/><path d="M10 8h4"/>',
+  outerwear: '<path d="M8 3 3 6v15h5v-9M16 3l5 3v15h-5v-9"/><path d="M8 3c1 2 2.5 3 4 3s3-1 4-3M8 21h8V9M12 6v15"/>',
+  shoes: '<path d="M3 17v-5l5-1 3-4c1 1 1.5 3 1.5 3l7.5 3c1 .5 1.5 1.5 1.5 2.5V17Z"/><path d="M3 17v2h18v-2"/>',
+  accessory: '<path d="M5 9h14l-1 12H6L5 9Z"/><path d="M9 9V7a3 3 0 0 1 6 0v2"/>',
+  jewelry: '<circle cx="12" cy="14" r="6"/><path d="m10 5 2-2 2 2-2 3-2-3Z"/>',
+  all: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+};
+const icon = (cat: Category | "all") =>
+  `<svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">${ICONS[cat]}</svg>`;
 
 interface PageData {
   user: User;
@@ -196,10 +227,21 @@ function page({ user, items: allItems, outfits, reminders: pending, impact, hist
       <button name="how" value="trashed" class="quiet">Threw it away</button>
     </form></details>`;
 
+  const pieces = (items: Item[]) => items.reduce((n, i) => n + (i.quantity ?? 1), 0);
+  const present = CATEGORIES.filter((cat) => allItems.some((i) => i.category === cat));
+  // Big square tiles, one per category and "All items" last. Each opens its list.
+  const tiles = [...present, "all" as const]
+    .map((cat) => {
+      const count = cat === "all" ? pieces(allItems) : pieces(allItems.filter((i) => i.category === cat));
+      const label = cat === "all" ? "All items" : SECTION_TITLES[cat].replace(/^./, (c) => c.toUpperCase());
+      return `<button type="button" class="tile" data-cat="${cat}">${icon(cat)}<span>${label}</span><small>${count}</small></button>`;
+    })
+    .join("");
+
   const sections = CATEGORIES.map((cat) => {
     const items = allItems.filter((i) => i.category === cat);
     if (!items.length) return "";
-    return `<section><h2>${SECTION_TITLES[cat]} <span>${items.length}</span></h2><ul>${items
+    return `<section class="catlist" data-cat="${cat}"><h2>${SECTION_TITLES[cat]} <span>${pieces(items)}</span></h2><ul>${items
       .map(
         (i) =>
           `<li id="item-${i.id}"${fitsOf.has(i.id) ? ` class="has-photos" data-item="${i.id}"` : ""}><div><span>${esc(i.description)}${i.quantity > 1 ? ` <b class="count">×${i.quantity}</b>` : ""}${i.location ? ` <small>· ${esc(i.location)}</small>` : ""}</span>${thumbs(i)}</div><div class="right"><time>${fmtDate(i.created_at.getTime())}</time>${quantityForm(i)}${letGoForm(i)}</div></li>`,
@@ -251,7 +293,15 @@ ${
     : ""
 }
 <p class="sub">${plural(allItems.reduce((n, i) => n + (i.quantity ?? 1), 0), "piece")} · ${plural(outfits.length, "fit check")}${user.city ? ` · ${esc(user.city)}` : ""}</p>
-${sections || `<p class="empty">No items yet. Text something like "I have black straight-leg jeans".</p>`}
+${
+  sections
+    ? `<div class="tiles" id="tiles">${tiles}</div>
+<div class="closet" id="closet">
+  <div class="closet-head"><button type="button" class="back" id="back">← All categories</button><h2 id="closet-title"></h2></div>
+  ${sections}
+</div>`
+    : `<p class="empty">No items yet. Text something like "I have black straight-leg jeans".</p>`
+}
 <h2 id="fits">Fit checks</h2>
 ${photos ? `<div class="grid">${photos}</div>` : `<p class="empty">No fit checks yet. Send a photo of today's outfit.</p>`}
 <h2>Reminders</h2>
@@ -271,6 +321,73 @@ ${photos ? `<div class="grid">${photos}</div>` : `<p class="empty">No fit checks
   <label>Daily fit check<select name="fitCheck">${hourOptions}</select></label>
   <button type="submit">Save</button>
 </form>
+<script>
+(() => {
+  const root = document.documentElement;
+  const tiles = document.getElementById("tiles");
+  if (!tiles) return;
+  root.classList.add("js");
+  const closet = document.getElementById("closet");
+  const title = document.getElementById("closet-title");
+  const lists = [...closet.querySelectorAll(".catlist")];
+  const still = matchMedia("(prefers-reduced-motion: reduce)");
+  const swap = (update) => (document.startViewTransition && !still.matches ? document.startViewTransition(update) : update());
+  const labelOf = (cat) => tiles.querySelector('[data-cat="' + cat + '"] span').textContent;
+
+  let current = null; // the open category, or null for the tiles
+
+  function show(cat) {
+    current = cat;
+    root.classList.add("open");
+    closet.classList.toggle("one", cat !== "all");
+    lists.forEach((l) => l.classList.toggle("shown", cat === "all" || l.dataset.cat === cat));
+    title.textContent = labelOf(cat);
+    try { localStorage.setItem("closet-cat", cat); } catch {}
+  }
+  // The tapped tile and the list's title share a transition name in turn, so
+  // one morphs into the other, opening and closing.
+  function open(cat, tile) {
+    tile.style.viewTransitionName = "closet-title";
+    swap(() => {
+      tile.style.viewTransitionName = "";
+      title.style.viewTransitionName = "closet-title";
+      show(cat);
+    });
+  }
+  function close() {
+    const tile = tiles.querySelector('[data-cat="' + current + '"]');
+    title.style.viewTransitionName = "closet-title";
+    swap(() => {
+      title.style.viewTransitionName = "";
+      if (tile) tile.style.viewTransitionName = "closet-title";
+      root.classList.remove("open");
+      current = null;
+      try { localStorage.removeItem("closet-cat"); } catch {}
+    });
+    setTimeout(() => tile && (tile.style.viewTransitionName = ""), 700);
+  }
+
+  tiles.addEventListener("click", (e) => {
+    const tile = e.target.closest(".tile");
+    if (tile) open(tile.dataset.cat, tile);
+  });
+  document.getElementById("back").addEventListener("click", close);
+
+  // A link to one item (from a fit check, or after an edit) opens its category.
+  function revealHash() {
+    const item = location.hash.startsWith("#item-") && document.getElementById(location.hash.slice(1));
+    const list = item && item.closest(".catlist");
+    if (list) { show(list.dataset.cat); item.scrollIntoView({ block: "center" }); return true; }
+    return false;
+  }
+  window.addEventListener("hashchange", revealHash);
+  if (!revealHash()) {
+    let last = null;
+    try { last = localStorage.getItem("closet-cat"); } catch {}
+    if (last && (last === "all" || lists.some((l) => l.dataset.cat === last))) show(last);
+  }
+})();
+</script>
 <dialog class="viewer" aria-labelledby="viewer-title">
   <header><h3 id="viewer-title"></h3><button type="button" class="close" aria-label="Close">✕</button></header>
   <div class="shots"></div>
