@@ -19,6 +19,13 @@ const UNKNOWN = "unknown"; // fields a texted item didn't mention
 
 export type Matcher = (seen: ExtractedItem[], owned: Item[]) => Promise<(number | null)[]>;
 
+/**
+ * A matcher's answer can carry, per seen item, the owned items it was rated
+ * "similar" to: different pieces, but near-duplicates (two navy polos). Ingest
+ * records those pairs for "what should I get rid of?".
+ */
+export type Matches = (number | null)[] & { alike?: number[][] };
+
 export const exactMatcher: Matcher = async (seen, owned) => matchWithGroups(seen, owned, exactGroups);
 
 /** Matches by looking at the photo; falls back to name matching if the call fails. */
@@ -30,7 +37,10 @@ export function visionMatcher(
 ): Matcher {
   return async (seen, owned) => {
     try {
-      return pickSameItems(await compareToCloset(image, seen, owned, ask, load));
+      const comparison = await compareToCloset(image, seen, owned, ask, load);
+      const matches: Matches = pickSameItems(comparison);
+      matches.alike = comparison.map((ms) => ms.filter((m) => m.similarity === "similar").map((m) => m.item.id));
+      return matches;
     } catch (err) {
       console.error("vision matching failed; falling back to name matching", err);
       return fallback(seen, owned);
@@ -59,7 +69,7 @@ async function saveSeen(
   const categories = [...new Set(seen.map((s) => s.category))];
   const owned = (await Promise.all(categories.map((c) => candidatesByCategory(db, userId, c)))).flat();
 
-  let matches: (number | null)[];
+  let matches: Matches;
   try {
     matches = await matcher(seen, owned);
   } catch (err) {
@@ -76,6 +86,16 @@ async function saveSeen(
         ? { item: await fillFromPhoto(db, existing, item, photoUrl), existed: true }
         : { item: await insertItem(db, { ...item, user_id: userId, source, photo_url: photoUrl }), existed: false },
     );
+  }
+  // Near-duplicates the comparison saw, between this photo's items and the closet.
+  for (const [index, { item }] of saved.entries()) {
+    for (const other of matches.alike?.[index] ?? []) {
+      if (other === item.id) continue;
+      await db.query(`INSERT INTO item_alike (item_id, other_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [
+        Math.min(item.id, other),
+        Math.max(item.id, other),
+      ]);
+    }
   }
   return saved;
 }

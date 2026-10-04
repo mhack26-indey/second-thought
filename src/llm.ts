@@ -92,6 +92,7 @@ export type Action =
   | { action: "last_worn"; name: string }
   | { action: "show_profile" }
   | { action: "update_profile"; city?: string; name?: string }
+  | { action: "update_details" }
   | { action: "help" }
   | { action: "chat"; kind: ChatKind };
 
@@ -120,6 +121,7 @@ export const ACTION_NAMES = [
   "last_worn",
   "show_profile",
   "update_profile",
+  "update_details",
   "help",
   "chat",
 ] as const satisfies readonly Action["action"][];
@@ -156,6 +158,7 @@ Corrections to their latest fit check photo (what the bot read from it is in "Th
 {"action":"delete_fit_check"}   (delete their latest fit check photo entirely: "delete my last fit check", "that pic wasn't a fit check")
 {"action":"show_profile"}   (their info / profile / settings)
 {"action":"update_profile","city":"<new city, optional>","name":"<what to call them, optional>"}   (they moved, or tell you their name; leave city out if they didn't name one)
+{"action":"update_details"}   (they tell you their clothing sizes, their age, or what their week involves: work, office, class, gym, going out)
 {"action":"help"}   (they ask what the bot can do)
 {"action":"chat","kind":"greeting|thanks|style|other"}   (small talk; "style" = any question about how something looks or what to wear)
 
@@ -316,6 +319,9 @@ export async function route(text: string, ctx: Context): Promise<Action[]> {
     const key = JSON.stringify(action);
     if (!action || seen.has(key)) continue; // drop invalid and duplicate actions
     if (action.action === "set_location" && !mentions(text, action.location)) continue; // copied from an example
+    // A city none of whose words they wrote ("change my city" -> "Chicago") came
+    // from an example: keep the action, so the bot asks which city.
+    if (action.action === "update_profile" && action.city && !mentionsAny(text, action.city)) delete action.city;
     seen.add(key);
     actions.push(action);
   }
@@ -477,6 +483,13 @@ function toItem(raw: any): ExtractedItem | undefined {
 }
 
 // Small models drift from the schema, so check every field before acting.
+/** True if any word of `phrase` appears in `text` ("chicago" for "Chicago, Illinois"). */
+function mentionsAny(text: string, phrase: string): boolean {
+  const words = (s: string) => s.toLowerCase().match(/[a-z0-9']+/g) ?? [];
+  const have = new Set(words(text));
+  return words(phrase).some((w) => have.has(w));
+}
+
 /** True if every word of `phrase` appears in `text` ("under-bed bin" in "put it in the under-bed bin"). */
 function mentions(text: string, phrase: string): boolean {
   const words = (s: string) => s.toLowerCase().match(/[a-z0-9']+/g) ?? [];
@@ -548,6 +561,8 @@ function validate(raw: any, now: Date): Action | undefined {
       const realCity = city && !PLACEHOLDER_CITY.test(city) ? city : undefined;
       return { action: "update_profile", ...(realCity && { city: realCity }), ...(name && { name }) };
     }
+    case "update_details":
+      return { action: "update_details" }; // profile.ts reads the text itself
     case "chat":
       return { action: "chat", kind: CHAT_KINDS.includes(raw.kind) ? raw.kind : "other" };
     case "list_reminders":

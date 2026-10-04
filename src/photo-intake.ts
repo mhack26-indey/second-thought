@@ -25,6 +25,7 @@ export interface PhotoDeps {
   parseOrder?: (image: ImageInput) => Promise<ParsedOrder>;
   matcher?: (image: ImageInput) => Matcher;
   today?: () => string;
+  name?: string; // their first name, for "Nice fit, Sam."
   /** The shopping match and its replies (ShoppingMode.match). */
   shop: (userId: string, image: ImageInput, seen: ExtractedItem[]) => Promise<Reply[]>;
 }
@@ -77,7 +78,7 @@ export async function readPhoto(
   );
   if (!result) return [];
   const { worn, added } = result;
-  const lines = ["Saved your fit check."];
+  const lines = [deps.name ? `Nice fit, ${deps.name}. Saved your fit check.` : "Saved your fit check."];
   if (worn.length) lines.push(`Wearing: ${worn.map(itemName).join(", ")}.`);
   if (added.length) lines.push(`New to your closet: ${added.map(itemName).join(", ")}.`);
   return [lines.join(" ")];

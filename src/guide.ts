@@ -10,6 +10,9 @@ export type Intent =
   | (typeof ACTION_NAMES)[number]
   | "fit_check_photo"
   | "closet_dump"
+  | "declutter"
+  | "declutter_answer"
+  | "profile_size"
   | "shopping_check"
   | "unskip"
   | "order_photo"
@@ -57,6 +60,8 @@ export const GUIDE: GuideSection[] = [
       { intent: "fit_same", command: "the jacket is actually my red puffer", does: "Tells me a 'new' item is one you already own, so it isn't counted twice." },
       { intent: "fit_not_there", command: "there's no hat in that", does: "Unlinks something that isn't in your last fit check." },
       { intent: "delete_fit_check", command: "delete my last fit check", does: "Removes your latest fit check, after you confirm." },
+      { intent: "declutter", command: "what should I get rid of?", does: "Up to 5 things you don't wear (unworn all season, a near-duplicate you skip, never worn), each with the way out: return it if you still can, resell (with when to list it) or donate.", reply: "1. navy polo with white trim: You have 2 navy polos; you wear the other one 5× more. Resell it in March…" },
+      { intent: "declutter_answer", command: "sold 2", does: 'After that list: marks number 2 as sold ("sold 2 for $15", "donated 1") and counts it as kept in circulation.' },
       { intent: "show_wardrobe", command: "my wardrobe", does: "Links your wardrobe page: everything you own, every fit check.", reply: "23 items in your wardrobe: (link)" },
     ],
   },
@@ -108,6 +113,8 @@ export const GUIDE: GuideSection[] = [
     entries: [
       { intent: "show_profile", command: "my profile", does: "Your name, city and fit check time." },
       { intent: "update_profile", command: "city Detroit", does: 'Changes your city (or "call me Sam" for your name).' },
+      { intent: "profile_size", command: "my shoe size is 10", does: 'Saves a size (or "my top size is M", "bottom size 32"), so shopping and resale links show your size.', reply: "Got it. Saved shoe size 10." },
+      { intent: "update_details", command: "I work in an office now", does: "Tells me what your week looks like (office, class, gym, going out…) or your age range, so suggestions fit your week." },
       { intent: "pause", command: "stop", does: "Pauses every message I'd start, until you text again." },
       { intent: "delete_data", command: "delete my data", does: "Erases your closet, photos and everything else, after you confirm." },
       { intent: "link_accounts", command: "link", does: "Moves your closet between iMessage and Telegram with a 6-digit code." },
@@ -144,6 +151,7 @@ const HELP = [
   '• "my reminders" to see your schedule',
   '• "winter jacket is in the under-bed bin", then "where\'s my winter jacket?"',
   '• "what should I buy?" to find the gap in what you wear',
+  '• "what should I get rid of?" for what to return, resell or donate',
   '• "my recap" for a card of your last 30 days',
   '• "check my closet" to find what you haven\'t been wearing',
   '• "add my closet", then photos of your closet rail, a drawer or a pile of clothes, to add a lot at once',
@@ -155,6 +163,7 @@ const HELP = [
   '• "delete my data" to erase everything and start over',
   '• "link" to move your closet between iMessage and Telegram',
   '• "my profile" to see your info, "city Detroit" or "call me Sam" to change it',
+  '• "my shoe size is 10" or "I work in an office now" so suggestions fit you',
   "Or send a fit check photo.",
 ].join("\n");
 

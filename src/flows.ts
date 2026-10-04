@@ -3,10 +3,12 @@ import { type ImageInput, type MediaType, visionEnabled } from "./closet/vlm.ts"
 import { type City, cityFrom, findCities } from "./cities.ts";
 import { exactGroups, findItemByName, llmGroups } from "./match.ts";
 import { addItemToOutfit, deleteFitCheck, itemsOnlyIn, linkItem, mergeItems, relabelItem, unlinkItem } from "./fit-edits.ts";
-import { WINDOW_DAYS, worthBuying } from "./gaps.ts";
+import { WINDOW_DAYS, worthBuyingResult } from "./gaps.ts";
 import { type BotReply, type RecentFitCheck, ShoppingMode, isShoppingCaption } from "./shopping-mode.ts";
 import { readClosetPhoto, readPhoto } from "./photo-intake.ts";
 import { ClosetMode } from "./closet-mode.ts";
+import { answerDeclutter, declutterPicks, declutterReplies, isDeclutterAsk, saveDeclutterList } from "./declutter.ts";
+import { PROFILE_QUESTION, type ProfilePatch, budgetLine, describePatch, nextProfileStep, occasionNotes, parseProfile, quickProfileEdit, reaskQuestion, saveProfile } from "./profile.ts";
 import { answerFromCloset } from "./ask.ts";
 import { climateFor } from "./climate.ts";
 import { SNOOZE_DAYS, UNWORN_DAYS, findGhosts, ghostQuestion, markAsked, parseCheckinAnswer, pendingCheckin, setCheckin } from "./ghosts.ts";
@@ -198,7 +200,8 @@ async function chooseCity(user: User, text: string): Promise<string[]> {
 /** Saves their city; during onboarding, also finishes it. */
 async function setCity(user: User, city: string): Promise<string[]> {
   const onboarding = !user.city;
-  await updateUser(user.id, { city, step: "done", cityOptions: null });
+  // Onboarding goes on to the profile question; a later change is just the city.
+  await updateUser(user.id, { city, step: onboarding ? "profile" : "done", cityOptions: null });
   if (!onboarding) return [`Got it, your city is now ${city}.`];
 
   const hour = user.fitCheckHour;
@@ -206,17 +209,39 @@ async function setCity(user: User, city: string): Promise<string[]> {
     `Got it, ${city}.`,
     hour === null ? "Daily fit checks are off." : `I'll ask for a fit check every day around ${formatHour(hour)}.`,
   ].join(" ");
-  // Then the closet offer, the three-photo loop with the guide link, and the wardrobe page.
+  return [done, PROFILE_QUESTION];
+}
+
+/**
+ * Their answer to the profile question: whatever's clear is saved; anything
+ * unclear is asked again once; then onboarding finishes with the closet
+ * offer, the three-photo loop and the wardrobe link.
+ */
+async function answerProfile(user: User, text: string): Promise<string[]> {
+  const parsed = await parseProfile(text).catch((err) => {
+    console.error("profile answer couldn't be read", err);
+    return { patch: {} as ProfilePatch, unclear: [], under18: false };
+  });
+  await saveProfile(db, user.id, parsed.patch); // under 18: no age is in the patch
+  if (nextProfileStep(user.step as "profile" | "profile_again", parsed.unclear) === "profile_again") {
+    await updateUser(user.id, { step: "profile_again" });
+    return [reaskQuestion(parsed.unclear)];
+  }
+  await updateUser(user.id, { step: "done" });
+  const name = parsed.patch.name ?? user.name;
+  const saved = describePatch({ ...parsed.patch, name: undefined });
+  const thanks = saved ? `Thanks${name ? `, ${name}` : ""}! Saved: ${saved}.` : name ? `Thanks, ${name}!` : "No problem.";
   const finish = [closet.offer(user.id), onboardingIntro(guideUrl(user)), wardrobeLinkMessage(wardrobeUrl(user))];
   const first = firstRequests.get(user.id);
-  if (first === undefined) return [done, ...finish];
+  if (first === undefined) return [thanks, ...finish];
   firstRequests.delete(user.id);
-  return [done, ...(await handleText({ ...user, city, step: "done", cityOptions: null }, first)), ...finish];
+  return [thanks, ...(await handleText({ ...user, name, step: "done" }, first)), ...finish];
 }
 
 /** Handle a text message from a user, returning the replies to send. */
 export async function handleText(user: User, text: string): Promise<string[]> {
   if (user.step === "city") return chooseCity(user, text);
+  if (user.step === "profile" || user.step === "profile_again") return answerProfile(user, text);
   if (user.step === "city_pick") {
     const pick = /^\s*#?(\d+)[.)]?\s*$/.exec(text);
     const chosen = pick ? user.cityOptions?.[Number(pick[1]) - 1] : undefined;
@@ -392,7 +417,12 @@ async function runAction(user: User, action: Action, listed: Reminder[], text = 
         console.error("color grouping failed", err);
         return exactGroups;
       });
-      return [worthBuying(wears, groups)];
+      // What their week needs comes first (profile.ts), checked against everything they own.
+      const notes = occasionNotes(user.occasions, await listItems(user.id), wears);
+      const gap = worthBuyingResult(wears, groups);
+      // Budget framing (age range) only when there's something to buy; it never changes what.
+      const budget = notes.length || gap.buy ? budgetLine(user.ageRange) : null;
+      return [[...notes, gap.text, budget].filter(Boolean).join("\n")];
     }
 
     case "show_profile": {
@@ -402,10 +432,13 @@ async function runAction(user: User, action: Action, listed: Reminder[], text = 
         [
           `Name: ${user.name ?? "not set"}`,
           `City: ${user.city ?? "not set"}`,
+          `Age range: ${user.ageRange?.replace("-", "–") ?? "not set"}`,
+          `Your week: ${user.occasions?.join(", ") || "not set"}`,
+          `Sizes: ${[user.sizeTop && `top ${user.sizeTop}`, user.sizeBottom && `bottom ${user.sizeBottom}`, user.sizeShoe && `shoe ${user.sizeShoe}`].filter(Boolean).join(", ") || "not set"}`,
           `Daily fit check: ${hour === null ? "off" : formatHour(hour)}`,
           `Wardrobe: ${plural(items.length, "item")}, ${plural(outfits.length, "fit check")}`,
           `Edit it here: ${wardrobeUrl(user)}#profile`,
-          'Or text "city Detroit", "call me Sam", or "fit check at 8am".',
+          'Or text "city Detroit", "call me Sam", "my shoe size is 10", or "fit check at 8am".',
         ].join("\n"),
       ];
     }
@@ -426,7 +459,19 @@ async function runAction(user: User, action: Action, listed: Reminder[], text = 
     case "help":
       return [helpText(guideUrl(user))];
 
+    case "update_details": {
+      // Sizes, age range, what their week looks like (profile.ts reads the text).
+      const parsed = await parseProfile(text).catch(() => undefined);
+      if (!parsed) return ["I couldn't read that. You can edit your details here: " + wardrobeUrl(user) + "#profile"];
+      await saveProfile(db, user.id, parsed.patch);
+      const saved = describePatch(parsed.patch);
+      if (saved) return [`Got it. Saved ${saved}.`];
+      if (parsed.under18) return ["Got it."];
+      return [`I didn't catch the details. You can edit them here: ${wardrobeUrl(user)}#profile`];
+    }
+
     case "chat":
+      if (action.kind === "greeting" && user.name) return [`Hey ${user.name}! Send a fit check, or text "help" to see what I can do.`];
       return [CHAT_REPLIES[action.kind]];
   }
 }
@@ -518,6 +563,21 @@ export async function handleTextMessage(user: User, text: string): Promise<BotRe
     // "add my closet", or "done" / "skip" while closet mode is open (closet-mode.ts)
     const closetText = closet.onText(user.id, text);
     if (closetText) return closetText;
+    // "what should I get rid of?", then "sold 2" / "donated 2" (declutter.ts)
+    if (isDeclutterAsk(text)) {
+      const climate = user.city ? await climateFor(db, user.city).catch(() => undefined) : undefined;
+      const picks = await declutterPicks(db, user.id, climate, new Date(), user);
+      await saveDeclutterList(db, user.id, picks);
+      return { replies: declutterReplies(picks) };
+    }
+    const decluttered = await answerDeclutter(db, user.id, text);
+    if (decluttered) return { replies: [decluttered] };
+    // "my shoe size is 10", "I'm 22": no model needed (profile.ts)
+    const quick = quickProfileEdit(text);
+    if (quick) {
+      await saveProfile(db, user.id, quick.patch);
+      return { replies: [quick.under18 ? "Got it." : `Got it. Saved ${describePatch(quick.patch)}.`] };
+    }
     const checkin = await answerCheckin(user, text);
     if (checkin) return { replies: [checkin] };
     if (CHECK_CLOSET.test(text.trim().toLowerCase().replace(/[.!?]+$/, ""))) {
@@ -532,7 +592,7 @@ export async function handleTextMessage(user: User, text: string): Promise<BotRe
     if (returns) return { replies: returns };
     if (isImpactAsk(text)) return { replies: [impactReply(await impactTotals(db, user.id))] };
     if (RECAP_ASK.test(text.trim().toLowerCase().replace(/[.!?]+$/, ""))) {
-      const { card, summary } = await recapFor(user.id, last30Days());
+      const { card, summary } = await recapFor(user.id, last30Days(), user.name);
       return { replies: [...(card ? [{ image: card, name: "recap.png", mimeType: "image/png" }] : []), summary, `Share it: ${recapUrl(user)}`] };
     }
     if (isUnskip(text)) {
@@ -551,6 +611,10 @@ const VISION_TYPES = new Set<string>(["image/jpeg", "image/png", "image/gif", "i
 
 export async function handlePhoto(user: User, image: Buffer, mimeType: string, caption?: string): Promise<BotReply> {
   if (user.paused) await setPaused(user.id, false); // any message: they're back
+  if (user.step === "profile" || user.step === "profile_again") {
+    await updateUser(user.id, { step: "done" }); // a photo instead of answers: skip the rest
+    user.step = "done";
+  }
   if (user.step !== "done") return { replies: [ASK_CITY] };
   const canRead = visionEnabled() && VISION_TYPES.has(mimeType);
   const input: ImageInput = { base64: image.toString("base64"), mediaType: mimeType as MediaType };
@@ -591,7 +655,7 @@ export async function handlePhoto(user: User, image: Buffer, mimeType: string, c
   // screenshot comes back out and goes to order intake (photo-intake.ts).
   return {
     replies: ["Got it, taking a look..."],
-    later: () => (fit.work = readPhoto(user.id, outfit, input, fit, photoDeps)),
+    later: () => (fit.work = readPhoto(user.id, outfit, input, fit, { ...photoDeps, name: user.name ?? undefined })),
   };
 }
 

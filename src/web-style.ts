@@ -156,6 +156,12 @@ export const STYLE = `${TOKENS}
   button.danger:hover { background: #d97a38; color: var(--ink); }
   button:disabled { opacity: .5; cursor: default; }
   .saved { color: var(--primary-superdark); font-size: .875rem; margin: 0; }
+  fieldset.week { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+  fieldset.week legend { font-size: .875rem; color: var(--muted); margin-bottom: 5px; padding: 0; }
+  label.check { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; padding: 6px 12px; border-radius: var(--r-pill); background: var(--bg-dim); color: var(--neutral); font-size: .875rem; cursor: pointer; }
+  label.check input { width: auto; margin: 0; padding: 0; accent-color: var(--primary-darker); }
+  .sizes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .sizes input { width: 100%; }
   .error { color: #a4501a; font-size: .875rem; margin: 0; }
   .notice { padding: 10px 15px; border-radius: var(--r-btn); background: var(--bg-dim); border-left: 4px solid var(--primary-darker); color: var(--neutral); margin: 0 0 15px; }
   .letgo summary { cursor: pointer; color: var(--primary-darkest); font-size: .8125rem; list-style: none; }
@@ -188,6 +194,18 @@ export const STYLE = `${TOKENS}
   .suggest small { color: var(--muted); }
   .fit details summary { cursor: pointer; color: var(--primary-darkest); font-size: .875rem; }
   .fit details div { display: flex; gap: 5px; margin-top: 8px; }
+
+  /* Recommendation cards ("Let go", "Before winter"): feature cards with the item's photo as the tile. */
+  .picks { display: grid; gap: 10px; }
+  .pick { display: flex; gap: 15px; align-items: flex-start; padding: 15px; border-radius: var(--r-panel); background: var(--bg-dim); animation: fade .4s ease both; animation-delay: calc(var(--i, 0) * 60ms); }
+  .pick .ico { flex: none; width: 64px; height: 80px; display: grid; place-items: center; border-radius: var(--r-btn); overflow: hidden; background: var(--primary-darker); color: var(--bg); }
+  .pick .ico img { width: 100%; height: 100%; object-fit: cover; }
+  .pick h3 { font-size: 1rem; margin: 0 0 4px; overflow-wrap: anywhere; }
+  .pick .n { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 4px; border-radius: var(--r-pill); background: var(--primary); color: var(--neutral); font-family: var(--sans); font-size: .75rem; vertical-align: 2px; }
+  .pick p { margin: 0 0 4px; font-size: .875rem; }
+  .pick .exit { color: var(--neutral); font-weight: 700; }
+  .pick .exit-return { color: #8a4313; }
+  .pick .exit a { font-weight: 400; }
 
   /* Tabs across the wardrobe pages. */
   .tabs { display: flex; gap: 5px; margin: 0 0 15px; padding: 4px; background: var(--bg-dim); border-radius: var(--r-pill); width: fit-content; max-width: 100%; overflow-x: auto; }

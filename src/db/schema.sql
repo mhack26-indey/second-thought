@@ -46,3 +46,13 @@ CREATE TABLE IF NOT EXISTS wears (
 );
 
 CREATE INDEX IF NOT EXISTS wears_outfit_id_idx ON wears (outfit_id);
+
+-- Pairs of distinct items the vision comparison rated "similar" (a near-duplicate:
+-- owning one makes the other redundant, like two navy polos), recorded at ingest.
+-- "What should I get rid of?" uses them. Stored once per pair, smaller id first.
+CREATE TABLE IF NOT EXISTS item_alike (
+  item_id  INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+  other_id INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+  PRIMARY KEY (item_id, other_id),
+  CHECK (item_id < other_id)
+);

@@ -4,6 +4,7 @@ import { formatDay } from "./closet/dates.ts";
 import type { ExtractedItem } from "./closet/extract.ts";
 import { deleteOutfit } from "./closet/repo.ts";
 import { recordAvoided } from "./impact.ts";
+import { type Profile, getProfile, sizedQuery } from "./profile.ts";
 import { type ShoppingResult, matchShoppingPhoto } from "./closet/shopping.ts";
 import type { ImageInput } from "./closet/vlm.ts";
 
@@ -120,7 +121,8 @@ export class ShoppingMode {
     // A match is a suggestion to skip, not a skip: it counts once they say so (answerSkip).
     const top = result.matches[0];
     if (top) this.skipQuestions.set(userId, { itemId: top.item_id, asked: this.now() });
-    return shoppingReplies(result, new Date(this.now()));
+    const sizes = await getProfile(this.deps.db, userId).catch(() => undefined); // links in their size
+    return shoppingReplies(result, new Date(this.now()), sizes);
   }
 
   /**
@@ -153,10 +155,10 @@ export class ShoppingMode {
   }
 }
 
-export function shoppingReplies(result: ShoppingResult, now = new Date()): Reply[] {
+export function shoppingReplies(result: ShoppingResult, now = new Date(), sizes?: Pick<Profile, "sizeTop" | "sizeBottom" | "sizeShoe"> | null): Reply[] {
   if (!result.seen.length) return ["I couldn't spot any clothes in that photo."];
   if (!result.matches.length) {
-    const query = encodeURIComponent(result.seen[0]!.description);
+    const query = encodeURIComponent(sizedQuery(result.seen[0]!.description, result.seen[0]!.category, sizes));
     return [`Nothing like it in your closet.\nSecondhand: https://www.depop.com/search/?q=${query}`];
   }
   const lines = result.matches.map((m) => {

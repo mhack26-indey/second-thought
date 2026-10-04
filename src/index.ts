@@ -114,7 +114,7 @@ async function sendMonthlyRecaps() {
   for (const userId of users) {
     try {
       const space = await spaceFor(userId);
-      const { card, summary } = await recapFor(userId, month);
+      const { card, summary } = await recapFor(userId, month, (await getUser(userId))?.name);
       if (card) await space.send(attachment(Buffer.from(card), { name: "recap.png", mimeType: "image/png" }));
       await space.send(summary);
     } catch (err) {

@@ -8,7 +8,7 @@ Built for MHacks on [Spectrum](https://photon.codes/docs/spectrum-ts) (Photon's 
 
 | You send | The bot |
 |---|---|
-| Your first text | Welcomes you and asks for your city, offers to add your closet from a few photos (or skip), then explains the three-photo loop (fit check, "do I have this?" screenshot, receipt) with a link to the guide, and sends your wardrobe page link |
+| Your first text | Welcomes you and asks for your city, then a few optional profile questions in one message (first name, age range, what your week looks like, sizes; "skip" for any, and only unclear answers get asked again, once), offers to add your closet from a few photos (or skip), then explains the three-photo loop (fit check, "do I have this?" screenshot, receipt) with a link to the guide, and sends your wardrobe page link |
 | 👕 A photo of your closet rail, a drawer or a pile of clothes | Reads every item and adds the new ones to your closet, with no wears logged: "Added 6 items: navy polo, black jeans, … 2 you already had." "add my closet" (or "closet dump") makes every photo for the next 10 minutes count as one; "done" ends it with "Your closet has 23 items…" |
 | 📸 A fit check photo | Replies right away, then lists what you're wearing: items it already knows get a wear logged, new ones are added to your closet |
 | "do I have this?", then a photo (or the photo, then "do I have this?") | Checks the photo against your closet without saving it: "You already have 1 like this:" with the model's reason, how long you've owned it and whether it's still returnable, then that item's photo. No match: a Depop search link. A product photo sent on its own gets the same check. |
@@ -20,10 +20,12 @@ Built for MHacks on [Spectrum](https://photon.codes/docs/spectrum-ts) (Photon's 
 | "sold the gray sweater" | Finds the item even when it was logged under other words (a "grey crewneck") and removes it |
 | "put my winter jacket in the under-bed bin" | Remembers where it is |
 | "where's my winter jacket?" | "Your winter jacket: under-bed bin, since Oct 3." |
+| "what should I get rid of?" (or "declutter") | Up to 5 pieces you don't wear, worked out from your own fit checks: unworn through their whole season (a puffer is never flagged in July), the one of two near-duplicates you skip ("You have 2 navy polos; you wear the other one 5× more"), or never worn since added. Nothing added or worn in the last 30 days. Each gets an exit: return it while the window's open, otherwise resell (timed to when people buy it: "list it in March, when people buy shorts", with Depop and eBay links) or donate a plain basic. "sold 2" or "donated 2" takes it out and counts it in your impact. Also a "Let go" section on the wardrobe page. |
 | "what should I actually buy?" | Finds the gap in what you wear: "You wear 6 bottoms with the same 2 tops. A gray top would go with all of them: 6 new outfits." If nothing stands out, it says to buy nothing. |
 | "remind me friday at 5pm to return the jacket" | Sends the reminder at that time |
 | "fit check at 8am" / "stop fit checks" | Moves or turns off the daily fit check prompt |
 | "my wardrobe" | A link to your wardrobe page: items by category, where they're kept, fit check photos, reminders, and an editable profile |
+| "my shoe size is 10", "I work in an office now" | Updates your profile (also editable on the wardrobe page). Your week shapes "what should I buy?" (the gym with no athletic shoes, office days with no office pieces, checked against what you already own, storage included), your sizes go into every Depop/eBay link, and your age range only changes the budget line (secondhand first when younger), never what's suggested. Your name shows up in greetings, fit check replies and the recap. An age range is stored, never an age; under 18 is stored as nothing. |
 | "help" | The short list of things it understands, ending with a link to the full guide: every command with an example reply and a Copy button, at `/w/<token>/guide` (a tab next to your closet) and publicly at `/guide` |
 
 One text can carry several requests ("got a black puffer, remind me friday to return the green jacket"). The bot never gives style advice: "what should I wear?" gets a fixed reply saying so.
@@ -117,11 +119,11 @@ What the numbers hide:
 
 ### Earlier checks
 
-- **Text router:** 48 of 49 sample texts routed correctly with Llama 3.1 8B (`bun run eval`), including chained requests, at about 0.3s per text; 15 of 16 on phrasings it hadn't seen. Local qwen2.5:7b scored 49 of 49 but took about 1.1s, and 14s for name grouping (comparison in `src/llm.ts`).
+- **Text router:** 64 of 65 sample texts routed correctly as of Oct 4 (earlier: 48 of 49) with Llama 3.1 8B (`bun run eval`), including chained requests, at about 0.3s per text; 15 of 16 on phrasings it hadn't seen. Local qwen2.5:7b scored 49 of 49 but took about 1.1s, and 14s for name grouping (comparison in `src/llm.ts`).
 - **Name grouping:** 9 of 9 tricky color and pattern names sorted correctly (charcoal, heather grey, dark blue, khaki, maroon, sage, pinstripe, gingham, logo). The matcher kept a graphic tee, a plain tee, navy jeans and black jeans apart while matching grey with charcoal.
 - **Extraction:** on a real outfit photo sent twice (once as HEIC, once as JPEG), Gemini found the same 6 items both times in about 2s. Two of them came back with drifted names (off-white → beige, plus a second color on the sunglasses), which is why neighboring shades now match.
 - **Vision matching** (10 street-style test photos, 6 of the same person on different days, run end to end on a local database): resending a photo added no duplicates (5 of 5 items, then 8 of 8 on a 54-item closet). The same leather-panel top was recognized across two days although its descriptions differed, and different people's items never merged. A cropped "shopping photo" of camo pants matched the owned pants as `near_identical`, and matched nothing before they were in the closet. On 5 hard cases run 5 times each: 19 of 25 right. The misses: two woven black bags (a flap bag and a tote) merged in 4 of 5 runs, and a resent top in a crowded closet was missed in 2 of 5.
-- **Tests:** 121 unit and database tests (`bun test`, using in-process Postgres via PGlite).
+- **Tests:** 143 unit and database tests (`bun test`, using in-process Postgres via PGlite).
 
 ## Setup
 
@@ -198,6 +200,8 @@ src/
   shopping-mode.ts  "Do I have this?": shopping photo vs. fit check, match replies
   photo-intake.ts   Reads a saved photo: fit check ingest, closet dump, order screenshot → order intake, product → shopping match
   closet-mode.ts    "add my closet": 10 minutes of closet dump photos, "done", the onboarding offer
+  declutter.ts      "What should I get rid of?": ghosts, near-duplicates, never worn; return, resell or donate; "sold 2"
+  profile.ts        Profile details: onboarding question, parsing, sizes in links, occasion notes, budget framing
   guide.ts          The usage guide's content (every command, keyed by router intent), help text, onboarding intro
   guide-page.ts     The guide as a page: /w/<token>/guide and the public /guide
   web-style.ts      Shared page styling: design system tokens, icons, tabs
