@@ -49,7 +49,9 @@ export async function readPhoto(
     await fit.cleanup?.().catch((err) => console.error(`cleanup for outfit ${outfit.id} failed`, err));
     if (photo.kind === "order_screenshot") return oneAtATime(userId, () => readOrder(userId, image, deps));
     return [
-      "That looks like a product photo, so I checked your closet instead of saving it as a fit check.",
+      photo.listing
+        ? `That looks like a listing for "${photo.listing}", so I checked your closet for it instead of saving a fit check.`
+        : "That looks like a product photo, so I checked your closet instead of saving it as a fit check.",
       ...(await deps.shop(userId, image, photo.items)),
     ];
   }
