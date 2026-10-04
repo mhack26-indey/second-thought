@@ -45,6 +45,8 @@ export async function claimNudges(
        AND ($2::date IS NULL OR p.return_deadline <= $2::date)
        AND ($3::text IS NULL OR p.user_id = $3)
        AND ($4::date IS NULL OR p.order_date <= $4::date)
+       -- scheduled nudges skip people who said "stop"; asking ("check returns") still works
+       AND ($3::text IS NOT NULL OR NOT EXISTS (SELECT 1 FROM users u WHERE u.id = p.user_id AND u.paused))
        -- worn in a fit check taken after the order: it's staying
        AND NOT EXISTS (
          SELECT 1 FROM wears w JOIN outfits o ON o.id = w.outfit_id

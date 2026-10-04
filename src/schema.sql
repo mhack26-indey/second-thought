@@ -142,3 +142,7 @@ create table if not exists item_checkins (
 );
 create index if not exists item_checkins_user on item_checkins (user_id);
 alter table users add column if not exists last_checkin_ask date;  -- at most one question a week
+
+-- "stop": no messages the bot starts (pings, nudges, check-ins, recaps,
+-- reminders) until they text again.
+alter table users add column if not exists paused boolean not null default false;
