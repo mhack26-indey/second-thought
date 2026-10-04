@@ -22,9 +22,10 @@ test("extraction schema converts to JSON Schema with the type enum", () => {
 });
 
 test("extraction schema rejects types outside the list", () => {
-  expect(ExtractionSchema.safeParse({ image_kind: "fit_check", items: [modelItem] }).success).toBe(true);
-  expect(ExtractionSchema.safeParse({ image_kind: "selfie", items: [] }).success).toBe(false);
-  const bad = { image_kind: "fit_check", items: [{ ...modelItem, type: "fedora" }] };
+  expect(ExtractionSchema.safeParse({ image_kind: "fit_check", listing_title: null, items: [modelItem] }).success).toBe(true);
+  expect(ExtractionSchema.safeParse({ image_kind: "product", listing_title: "Relaxed Straight Jean", items: [modelItem] }).success).toBe(true);
+  expect(ExtractionSchema.safeParse({ image_kind: "selfie", listing_title: null, items: [] }).success).toBe(false);
+  const bad = { image_kind: "fit_check", listing_title: null, items: [{ ...modelItem, type: "fedora" }] };
   expect(ExtractionSchema.safeParse(bad).success).toBe(false);
 });
 

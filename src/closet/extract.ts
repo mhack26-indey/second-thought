@@ -18,12 +18,15 @@ export const ModelItemSchema = z.object({
 
 // What kind of photo it is, read in the same call so routing costs nothing:
 // a fit check (worn clothes), an order screenshot (a retailer's order or
-// receipt page), or a product shot (a store photo or listing, nobody wearing it).
+// receipt page), or a product shot (a store photo or listing, even with a
+// model wearing it). A listing's title says which garment is for sale, so only
+// that one is read, not the rest of the model's outfit.
 export const IMAGE_KINDS = ["fit_check", "order_screenshot", "product"] as const;
 export type ImageKind = (typeof IMAGE_KINDS)[number];
 
 export const ExtractionSchema = z.object({
   image_kind: z.enum(IMAGE_KINDS),
+  listing_title: z.string().nullable(), // a store listing's product name, as shown
   items: z.array(ModelItemSchema),
 });
 
@@ -36,12 +39,19 @@ const typeList = Object.entries(CATEGORY_TYPES)
 
 const EXTRACT_PROMPT = `First, image_kind:
 - order_screenshot: a screenshot of an online order, order confirmation, receipt or shipping email (a retailer's page or app listing items bought, usually with prices)
-- product: a product photo or store listing, or clothes photographed on a hanger, shelf or rack, with nobody wearing them
+- product: a store listing or product page (shop layout: a product name, a price, sizes, "add to bag/cart"), even when a model is wearing the item; or a product photo, or clothes on a hanger, shelf or rack with nobody wearing them
 - fit_check: anything else, usually a person showing what they're wearing
 
-If it's an order_screenshot, return an empty items list; the order is read separately. Otherwise:
+listing_title: for a product listing, its product name or description exactly as shown (e.g. "Relaxed Straight-Leg Jean"); otherwise null.
 
-List every clothing item, pair of shoes, accessory and piece of jewelry visibly worn or shown in this photo.
+If it's an order_screenshot, return an empty items list; the order is read separately.
+
+If it's a product listing, list ONLY what's for sale:
+- With a product name or description, list just the garment(s) it names, and none of the other clothes the model is styled in. Describe it in the listing's own words where they say something useful (color, cut, fabric).
+- If the listing sells a whole outfit (a "set", "matching set", "two-piece", "co-ord", bundle, or several pieces each with its own price), list every piece of it.
+- With no text, list only the featured item (the one centered or most prominent).
+
+Otherwise (a fit check or a plain product photo), list every clothing item, pair of shoes, accessory and piece of jewelry visibly worn or shown in this photo.
 
 For each item give:
 - type: exactly one of these, grouped by category:
@@ -63,6 +73,7 @@ Rules:
 export interface PhotoExtraction {
   kind: ImageKind;
   items: ExtractedItem[];
+  listing?: string | null; // a store listing's product name, if the photo is one
 }
 
 /** One vision call: what kind of photo it is, and the items in it. */
@@ -72,7 +83,7 @@ export async function extractPhoto(image: string | ImageInput): Promise<PhotoExt
     images: [toImageInput(image)],
     prompt: EXTRACT_PROMPT,
   });
-  return { kind: result.image_kind, items: result.items.map(withCategory) };
+  return { kind: result.image_kind, items: result.items.map(withCategory), listing: result.listing_title?.trim() || null };
 }
 
 export async function extractItems(image: string | ImageInput): Promise<ExtractedItem[]> {
