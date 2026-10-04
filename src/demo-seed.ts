@@ -283,7 +283,7 @@ export async function demoReplies(
   const profile = (await getProfile(db, userId))!;
   const wears = await recentWears(db, userId, WINDOW_DAYS);
   const groups = opts.groups ? await opts.groups(wears) : exactGroups;
-  const buy = buyAdvice(wears, await activeItems(db, userId), groups, profile);
+  const buy = buyAdvice(wears, await activeItems(db, userId), groups, profile, { climate: opts.climate, today: opts.today });
   const declutter = declutterReplies(await declutterPicks(db, userId, opts.climate, opts.today ?? new Date(), profile));
   return { buy, declutter };
 }

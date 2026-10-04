@@ -419,7 +419,9 @@ async function runAction(user: User, action: Action, listed: Reminder[], text = 
         console.error("color grouping failed", err);
         return exactGroups;
       });
-      return [buyAdvice(wears, await listItems(user.id), groups, user)];
+      // The coming season (season-needs.ts) from their city's climate, if it's known.
+      const climate = user.city ? await climateFor(db, user.city).catch(() => undefined) : undefined;
+      return [buyAdvice(wears, await listItems(user.id), groups, user, { climate })];
     }
 
     case "show_profile": {

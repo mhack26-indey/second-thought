@@ -15,7 +15,7 @@ For whoever tests next. Everything below is on `main`; `bun test` (150 tests), `
 - **`bun run smoke:demo`:** the whole demo conversation on a throwaway database with the models stubbed, every reply printed.
 
 ### Not built
-- **Season-aware "what should I buy for winter?"** It goes to the existing "what should I buy?" (outfit gap, notes for their week, budget line, sized secondhand links), which doesn't look at the coming season.
+- ~~Season-aware "what should I buy for winter?"~~ Built: "what should I buy?" now checks whether winter or summer starts within 6 weeks (from the city's monthly climate normals; there's no forecast in the codebase), says what you already own for it (storage included), and suggests at most 2 missing pieces in your most-worn colors with sized links, or "You're set for winter. Buy nothing." (`src/season-needs.ts`).
 - **Weekly recap push.** The monthly one (on the 1st) exists; "my recap" sends one on demand.
 - **CSV export** of the closet.
 

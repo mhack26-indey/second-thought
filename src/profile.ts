@@ -4,6 +4,8 @@ import type { Db } from "./db/client.ts";
 import { worthBuyingResult } from "./gaps.ts";
 import { llmJson } from "./llm.ts";
 import type { Groups } from "./match.ts";
+import type { Climate } from "./climate.ts";
+import { seasonAdvice } from "./season-needs.ts";
 
 // Profile details that make suggestions fit: first name, age range, what
 // their week looks like, and sizes. Asked once in onboarding (all optional),
@@ -301,17 +303,24 @@ export function buyAdvice(
   owned: Item[],
   groups: Groups,
   p: Pick<Profile, "occasions" | "ageRange" | "sizeTop" | "sizeBottom" | "sizeShoe">,
+  context: { climate?: Climate; today?: Date } = {},
 ): string {
   const notes = occasionAdvice(p.occasions, owned, wears);
   const gap = worthBuyingResult(wears, groups);
-  const buying = notes.some((n) => n.search) || gap.buy;
+  // A season change within six weeks comes first (season-needs.ts); without one, nothing changes.
+  const season = context.climate ? seasonAdvice(context.climate, owned, wears, context.today) : null;
+  const buying = notes.some((n) => n.search) || gap.buy || Boolean(season?.searches.length);
   const budget = buying ? budgetLine(p.ageRange) : null;
   // Secondhand first, in their size: one search per thing it suggests.
-  const searches = [...notes.flatMap((n) => (n.search ? [n.search] : [])), ...(gap.suggestion ? [gap.suggestion] : [])].map((q) => {
+  const wanted = [...(season?.searches ?? []), ...notes.flatMap((n) => (n.search ? [n.search] : [])), ...(gap.suggestion ? [gap.suggestion] : [])];
+  const searches = wanted.map((q) => {
     const query = encodeURIComponent(sizedQuery(q.query, q.category, p));
     return `Secondhand ${q.query}: https://www.depop.com/search/?q=${query} · eBay: https://www.ebay.com/sch/i.html?_nkw=${query}`;
   });
-  return [...notes.map((n) => n.text), gap.text, budget, ...searches].filter(Boolean).join("\n");
+  if (!season) return [...notes.map((n) => n.text), gap.text, budget, ...searches].filter(Boolean).join("\n");
+  // The season says what it needs; the outfit gap only adds a buy of its own, never a "buy nothing" that contradicts it.
+  const set = buying ? null : `You're set for ${season.season.name}. Buy nothing.`;
+  return [...season.lines, ...notes.map((n) => n.text), gap.buy ? gap.text : null, set, budget, ...searches].filter(Boolean).join("\n");
 }
 
 // ---- storage ----
