@@ -1,5 +1,5 @@
 import type { ExtractedItem } from "./closet/extract.ts";
-import { type Item, insertItem } from "./closet/repo.ts";
+import { type Item, deleteOutfit, insertItem } from "./closet/repo.ts";
 import type { Db } from "./db/client.ts";
 
 // Fixing a fit check by hand on the wardrobe page, when the vision model got
@@ -90,4 +90,33 @@ export async function relabelItem(db: Db, userId: string, itemId: number, as: Ex
     [userId, itemId, as.type, as.category, as.description, as.color_primary, as.pattern],
   );
   return row;
+}
+
+/**
+ * What deleting a fit check would take with it: the items first seen in it
+ * and worn nowhere else (the same rule as deleteOutfit), for the confirmation.
+ */
+export async function itemsOnlyIn(db: Db, userId: string, outfitId: number): Promise<string[]> {
+  const rows = await db.query<{ description: string }>(
+    `SELECT i.description FROM items i JOIN outfits o ON o.id = $2 AND o.user_id = $1
+     WHERE i.user_id = $1 AND i.source = 'fit_check' AND i.created_at >= o.created_at
+       AND EXISTS (SELECT 1 FROM wears w WHERE w.item_id = i.id AND w.outfit_id = o.id)
+       AND NOT EXISTS (SELECT 1 FROM wears w WHERE w.item_id = i.id AND w.outfit_id <> o.id)
+     ORDER BY i.id`,
+    [userId, outfitId],
+  );
+  return rows.map((r) => r.description);
+}
+
+/**
+ * Deletes a fit check: the outfit, its wears, and the items only it added
+ * (deleteOutfit). The stored photo is the caller's to delete (photos table).
+ * Returns the removed items' names, or undefined if it isn't theirs.
+ */
+export async function deleteFitCheck(db: Db, userId: string, outfitId: number): Promise<string[] | undefined> {
+  const [own] = await db.query(`SELECT 1 FROM outfits WHERE id = $2 AND user_id = $1`, [userId, outfitId]);
+  if (!own) return undefined;
+  const removed = await itemsOnlyIn(db, userId, outfitId);
+  await deleteOutfit(db, userId, outfitId);
+  return removed;
 }

@@ -2,7 +2,7 @@ import QRCode from "qrcode";
 import { CATEGORIES, type Category } from "./closet/categories.ts";
 import { cityFrom, findCities } from "./cities.ts";
 import { PORT, PUBLIC_URL } from "./config.ts";
-import { addItemToOutfit, linkItem, mergeItems, unlinkItem } from "./fit-edits.ts";
+import { addItemToOutfit, deleteFitCheck, itemsOnlyIn, linkItem, mergeItems, unlinkItem } from "./fit-edits.ts";
 import type { ExtractedItem } from "./closet/extract.ts";
 import { colorIn, itemFromName } from "./llm.ts";
 import { exactGroups, llmGroups, mostAlike, searchItems } from "./match.ts";
@@ -15,6 +15,7 @@ import {
   type Reminder,
   type User,
   db,
+  deletePhoto,
   getOutfit,
   getPhoto,
   getUserByToken,
@@ -128,6 +129,7 @@ const STYLE = `  :root { color-scheme: light dark; --muted: #888; --line: #8883;
   .suggest small { color: var(--muted); }
   .fit details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
   .fit details div { display: flex; gap: 6px; margin-top: 8px; }
+  button.danger { background: #d1495b; color: #fff; }
   .notice { padding: 10px 12px; border-radius: 8px; background: #2a9d5c22; margin: 0 0 16px; }
   .back { color: inherit; display: inline-block; margin-bottom: 12px; }
 `;
@@ -235,7 +237,7 @@ ${
 }
 <p class="sub">${plural(allItems.length, "item")} · ${plural(outfits.length, "fit check")}${user.city ? ` · ${esc(user.city)}` : ""}</p>
 ${sections || `<p class="empty">No items yet. Text something like "I have black straight-leg jeans".</p>`}
-<h2>Fit checks</h2>
+<h2 id="fits">Fit checks</h2>
 ${photos ? `<div class="grid">${photos}</div>` : `<p class="empty">No fit checks yet. Send a photo of today's outfit.</p>`}
 <h2>Reminders</h2>
 <ul><li>Daily fit check<time>${fitCheck}</time></li>${reminders}</ul>
@@ -336,6 +338,7 @@ ${photos ? `<div class="grid">${photos}</div>` : `<p class="empty">No fit checks
 }
 
 interface FitPageData {
+  onlyHere: string[]; // items only this photo added, removed with it
   user: User;
   outfit: Outfit;
   linked: Item[];
@@ -348,7 +351,7 @@ interface FitPageData {
  * One fit check, to fix what the vision model got wrong: merge a split item
  * into the one it really is, unlink what isn't there, link or add what's missing.
  */
-function fitPage({ user, outfit, linked, sameAs, closet, notice }: FitPageData): string {
+function fitPage({ user, outfit, linked, sameAs, closet, notice, onlyHere }: FitPageData): string {
   const base = `/w/${user.webToken}`;
   const action = `${base}/fit/${outfit.id}`;
   const rows = linked
@@ -441,6 +444,12 @@ ${rows ? `<ul>${rows}</ul>` : `<p class="empty">No items linked to this photo.</
   });
 })();
 </script>
+<h2>Not a fit check?</h2>
+<form method="post" action="${action}" onsubmit="return confirm('Delete this fit check${onlyHere.length ? ` and ${onlyHere.length} item${onlyHere.length === 1 ? "" : "s"} only seen in it` : ""}? This can\\'t be undone.')">
+  <input type="hidden" name="op" value="delete">
+  <p class="empty">${onlyHere.length ? `Deleting it also removes ${esc(onlyHere.join(", "))}, which only showed up in this photo.` : "Items you already had stay in your closet."}</p>
+  <button class="danger">Delete this fit check</button>
+</form>
 </body></html>`;
 }
 
@@ -615,7 +624,8 @@ export function startWebServer() {
           const sameAs = new Map(linked.map((i) => [i.id, mostAlike(i, items, groups)]));
           const closet = items.filter((i) => !linkedIds.has(i.id));
           const notice = new URL(req.url).searchParams.get("msg") ?? undefined;
-          return html(fitPage({ user, outfit, linked, sameAs, closet, notice }));
+          const onlyHere = await itemsOnlyIn(db, user.id, outfit.id);
+          return html(fitPage({ user, outfit, linked, sameAs, closet, notice, onlyHere }));
         },
         POST: async (req) => {
           const user = await getUserByToken(req.params.token);
@@ -642,6 +652,13 @@ export function startWebServer() {
                 ? `Merged: ${nameOf(itemId)} is now ${nameOf(into)}.`
                 : "Couldn't merge those two.";
               break;
+            }
+            case "delete": {
+              const removed = await deleteFitCheck(db, user.id, outfit.id);
+              if (removed && outfit.photoUrl) await deletePhoto(user.id, outfit.photoUrl);
+              const gone = removed?.length ? ` Also removed ${removed.join(", ")}.` : "";
+              const done = removed ? `Deleted your fit check from ${fmtDate(outfit.at)}.${gone}` : "Couldn't delete that fit check.";
+              return new Response(null, { status: 303, headers: { Location: `/w/${user.webToken}?msg=${encodeURIComponent(done)}#fits` } });
             }
             case "add": {
               const existing = Number(field("link") || field("existing"));

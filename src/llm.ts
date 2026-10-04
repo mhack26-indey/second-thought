@@ -87,6 +87,7 @@ export type Action =
   | { action: "fit_relabel"; name: string; as: string }
   | { action: "fit_missing"; name: string }
   | { action: "fit_not_there"; name: string }
+  | { action: "delete_fit_check" }
   | { action: "show_profile" }
   | { action: "update_profile"; city?: string; name?: string }
   | { action: "help" }
@@ -118,6 +119,7 @@ Corrections to their latest fit check photo (what the bot read from it is in "Th
 {"action":"fit_relabel","name":"<item in the fit check>","as":"<what it really is, in their words>"}   ("the X is actually a Y", "it's not an X, it's a Y")
 {"action":"fit_missing","name":"<the item, in their words>"}   ("you missed my X", "I'm also wearing X")
 {"action":"fit_not_there","name":"<item in the fit check>"}   ("there's no X in that", "X isn't in the photo")
+{"action":"delete_fit_check"}   (delete their latest fit check photo entirely: "delete my last fit check", "that pic wasn't a fit check")
 {"action":"show_profile"}   (their info / profile / settings)
 {"action":"update_profile","city":"<new city, optional>","name":"<what to call them, optional>"}   (they moved, or tell you their name; leave city out if they didn't name one)
 {"action":"help"}   (they ask what the bot can do)
@@ -173,6 +175,8 @@ const SINGLE_EXAMPLES: [string, object][] = [
   ["you missed my black watch", { action: "fit_missing", name: "black watch" }],
   ["oh I'm also wearing my black jeans in that one", { action: "fit_missing", name: "black jeans" }],
   ["there's no beanie in that pic", { action: "fit_not_there", name: "red beanie" }],
+  ["delete my last fit check", { action: "delete_fit_check" }],
+  ["oops that photo wasn't supposed to be a fit check, get rid of it", { action: "delete_fit_check" }],
   ["show me my closet", { action: "show_wardrobe" }],
   ["put my winter jacket in the under-bed bin", { action: "set_location", name: "winter jacket", location: "under-bed bin" }],
   ["the gray crewneck is at my mom's", { action: "set_location", name: "gray crewneck", location: "my mom's" }],
@@ -513,6 +517,7 @@ function validate(raw: any, now: Date): Action | undefined {
     case "show_wardrobe":
     case "show_profile":
     case "worth_buying":
+    case "delete_fit_check":
     case "help":
       return { action: raw.action };
     default:

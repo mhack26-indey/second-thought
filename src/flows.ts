@@ -2,7 +2,7 @@ import { type Action, type ChatKind, colorIn, itemFromName, route } from "./llm.
 import { type ImageInput, type MediaType, visionEnabled } from "./closet/vlm.ts";
 import { type City, cityFrom, findCities } from "./cities.ts";
 import { exactGroups, findItemByName, llmGroups } from "./match.ts";
-import { addItemToOutfit, linkItem, mergeItems, relabelItem, unlinkItem } from "./fit-edits.ts";
+import { addItemToOutfit, deleteFitCheck, itemsOnlyIn, linkItem, mergeItems, relabelItem, unlinkItem } from "./fit-edits.ts";
 import { WINDOW_DAYS, worthBuying } from "./gaps.ts";
 import { type BotReply, type RecentFitCheck, ShoppingMode } from "./shopping-mode.ts";
 import { readPhoto } from "./photo-intake.ts";
@@ -21,6 +21,7 @@ import {
   db,
   deletePhoto,
   latestFitCheck,
+  getOutfit,
   listItems,
   listOutfits,
   localDate,
@@ -328,6 +329,16 @@ async function runAction(user: User, action: Action, listed: Reminder[], text = 
       return [`Your ${item.description}: ${item.location}${since}.`];
     }
 
+    case "delete_fit_check": {
+      const latest = await latestFitCheck(user.id);
+      if (!latest) return ["You don't have any fit checks to delete."];
+      const onlyHere = await itemsOnlyIn(db, user.id, latest.outfit.id);
+      deleteQuestions.set(user.id, { outfitId: latest.outfit.id, at: Date.now() });
+      const day = latest.outfit.at ? new Date(latest.outfit.at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
+      const also = onlyHere.length ? ` That also removes ${onlyHere.join(", ")}, which only came from that photo.` : "";
+      return [`Delete your fit check from ${day}?${also} Reply yes to delete it.`];
+    }
+
     case "fit_same":
     case "fit_relabel":
     case "fit_missing":
@@ -396,6 +407,8 @@ const photoDeps = { db, shop: shopping.match.bind(shopping) };
 /** Handle a text message; "do I have this?" may answer later, after the vision model. */
 export async function handleTextMessage(user: User, text: string): Promise<BotReply> {
   if (user.step === "done") {
+    const deleteAnswer = await answerDelete(user, text);
+    if (deleteAnswer) return { replies: [deleteAnswer] };
     const letGoAnswer = await answerLetGo(user, text);
     if (letGoAnswer) return { replies: [letGoAnswer] };
     // "keep" / "return" after a nudge, "returned it", "check returns" (returns.ts)
@@ -456,6 +469,25 @@ export async function handlePhoto(user: User, image: Buffer, mimeType: string): 
 // a restart forgets an unanswered question, and the item simply stays.
 const letGoQuestions = new Map<string, { itemId: number; at: number }>();
 const LET_GO_WINDOW_MS = 30 * 60_000;
+
+// "Delete my last fit check" waits for a yes, since it can't be undone.
+const deleteQuestions = new Map<string, { outfitId: number; at: number }>();
+const DELETE_WINDOW_MS = 10 * 60_000;
+const YES = /^(?:yes|yeah|yep|yup|y|sure|ok(?:ay)?|do it|delete it|go ahead)\b/i;
+
+/** Their answer to "delete your fit check?", if one is waiting. */
+async function answerDelete(user: User, text: string): Promise<string | undefined> {
+  const waiting = deleteQuestions.get(user.id);
+  if (!waiting) return undefined;
+  deleteQuestions.delete(user.id); // one chance: anything else drops it
+  if (Date.now() - waiting.at > DELETE_WINDOW_MS) return undefined;
+  if (!YES.test(text.trim())) return /^(?:no|nope|nah|cancel|never ?mind|keep it)\b/i.test(text.trim()) ? "Okay, I kept it." : undefined;
+  const outfit = await getOutfit(user.id, waiting.outfitId);
+  const removed = await deleteFitCheck(db, user.id, waiting.outfitId);
+  if (!removed) return "That fit check is already gone.";
+  if (outfit?.photoUrl) await deletePhoto(user.id, outfit.photoUrl);
+  return removed.length ? `Deleted it, and removed ${removed.join(", ")}.` : "Deleted it. Everything else stays in your closet.";
+}
 
 /** Their answer to "how did it go?", if one is waiting. */
 async function answerLetGo(user: User, text: string): Promise<string | undefined> {

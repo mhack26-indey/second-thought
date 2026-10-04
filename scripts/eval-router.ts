@@ -47,6 +47,8 @@ const cases: [string, string, ((a: any) => boolean)?][] = [
   ["I'm also wearing white sneakers in that one", "fit_missing", (a) => /sneakers/.test(a.name)],
   ["there's no beanie in that photo", "fit_not_there", (a) => /beanie/.test(a.name)],
   ["the red beanie isn't in the pic", "fit_not_there", (a) => /beanie/.test(a.name)],
+  ["can you delete that last fit check", "delete_fit_check"],
+  ["that pic was a mistake, remove the whole fit check", "delete_fit_check"],
   ["sold my red beanie", "remove_item", (a) => /beanie/.test(a.name)],
   ["just got a silver watch", "add_items", (a) => a.items[0].type === "watch"],
   ["what can you do", "help"],
