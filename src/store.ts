@@ -181,11 +181,14 @@ export async function mergeUsers(fromId: string, toId: string): Promise<{ items:
     for (const table of ["items", "outfits", "photos", "reminders", "purchases", "impact_events", "item_checkins"]) {
       await tx.unsafe(`update ${table} set user_id = $2 where user_id = $1`, [fromId, toId]);
     }
+    // Dates go as YYYY-MM-DD strings: without prepared statements, Bun sends a
+    // Date as its toString() ("… GMT-0400"), which Postgres rejects.
+    const day = (d: unknown) => (d instanceof Date ? localDate(d) : (d as string | null));
     await tx`
       update users set step = 'done',
         name = coalesce(name, ${from.name}), city = coalesce(city, ${from.city}),
-        fit_check_hour = ${from.fit_check_hour}, last_fit_photo = ${from.last_fit_photo},
-        last_recap = ${from.last_recap}, last_checkin_ask = ${from.last_checkin_ask}, city_options = null
+        fit_check_hour = ${from.fit_check_hour}, last_fit_photo = ${day(from.last_fit_photo)},
+        last_recap = ${from.last_recap}, last_checkin_ask = ${day(from.last_checkin_ask)}::date, city_options = null
       where id = ${toId}`;
     // The wardrobe link moves too: free it from the old account first (it's unique).
     await tx`delete from users where id = ${fromId}`;
