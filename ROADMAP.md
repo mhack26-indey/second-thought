@@ -1,6 +1,6 @@
 # Roadmap status
 
-Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 2026, after PR #26 (season check-ins).
+Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 2026, after PR #29 ("stop" and "delete my data").
 
 **Legend:** ✅ done · 🟡 partly done · ⬜ not started · ✂️ dropped by a plan change
 
@@ -14,6 +14,19 @@ Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 20
 | Submission checklist | 🟡 README only; **the repo is still private** |
 
 **P0 is done, so the hour 12 gate is met** (built in code; still to be checked live end to end). P1 is done too, and misread fit checks can now be fixed on the wardrobe page or by text. Next: make the repo public, seed and rehearse the demo, then the rest of the submission checklist; P2 only if time is left.
+
+## MVP: the three-photo loop
+
+The product, as pitched: **a fit check most mornings, a screenshot when shopping, the receipt after buying.** Built end to end; two pieces still unproven on a real phone.
+
+| Step | Built | Proven live |
+|---|---|---|
+| Fit check → closet (dedup, wears) | ✅ | ✅ real photos, HEIC, closet eval |
+| Screenshot → "do I have this?" (matches, CO₂, skip) | ✅ | 🟡 only on rendered store pages, not real store apps |
+| Receipt / order → return window → "return it?" | ✅ | 🟡 online order screenshots in tests; **paper receipts untried** |
+| Payoff: impact counter, recap | ✅ | ✅ real data |
+| When it's wrong: corrections, fit check editor | ✅ | ✅ test users |
+| Trust: "stop" pauses all notifications, "delete my data" erases everything (#29) | ✅ | ✅ test user |
 
 ## P0: core
 
@@ -56,6 +69,8 @@ These weren't features in the plan, but the flows need them:
 - Fit check editor on the wardrobe page (`/w/<token>/fit/<id>`): "Same as this" merges an item the model split in two (suggestions ranked by type, LLM color groups, pattern and words), "Not in this photo" unlinks (and removes an item only that photo produced), and a search box suggests closet items as you describe one ("grey sweats", "pu…") or adds it as new (#13, #14)
 - Corrections by text for the latest fit check: same as / relabel / missed / not there (#15)
 - Letting items go: "got rid of the black jeans" asks whether it was returned, sold, donated or thrown away (unless the text says), and the wardrobe page has a Let it go menu per item; only thrown away counts nothing (#18)
+- Item quantities: "plain white tee ×3", set with "How many?" on the wardrobe page; letting go of one of several leaves the rest; "how many … do I have" by text links to the item (#28)
+- "stop" pauses everything the bot starts until they text again (reminders are held); "delete my data" asks, then erases everything and starts them over (#29)
 - Deleting a fit check, on its edit page or by text ("delete my last fit check", confirmed with yes), taking the items only it added with it (#20)
 - Find-by-name narrows by type and color in code before the model picks, so "sold my red hat" can't remove a gray crewneck (#8)
 - Closet accuracy eval on 15 real photos (`bun run eval:closet`, results in `eval/closet-results.md`): 0 missed and 0 wrong merges on the 6 confidently repeated items, 100% of items found with the right category, 88% with the right color, and 6/6 shopping matches right at @1
@@ -121,17 +136,21 @@ These weren't features in the plan, but the flows need them:
 | Muted colors read as grey/black/khaki in dim light | 6 of 50 colors wrong in the closet eval | Extraction prompt fix, rerun `bun run eval:closet` |
 | "fit checks at 7:30" (no am/pm) means 7:30 PM | Every text model tried reads it that way | Default bare times for fit checks to the morning |
 | "do I have this?" after a photo of one of your texted items | The texted item keeps details copied from the shopping photo | Delay filling in a texted item's details until the 2-minute undo window has passed (`src/ingest.ts`) |
-| Waiting states live in memory | A restart drops an open "do I have this?" window, a new user's held first message, an unanswered "how did it go?" or "delete it?" | Acceptable for the demo; store them in the database if it matters |
+| Waiting states live in memory | A restart drops an open "do I have this?" window, a new user's held first message, an unanswered "how did it go?", "delete it?" or "delete my data?" (the season check-ins are stored) | Acceptable for the demo; store them in the database if it matters |
 | Deleting a fit check hard-deletes the items only it added | A skip that matched one of those items drops out of the impact counts | Rare; soft-delete instead if it matters |
 | Seasonal check-ins in early October | In Ann Arbor, cold-weather pieces only came into season this month and puffers start in November, so only all-year items can be asked about in the demo | Expected behavior; show it with an all-year item, or explain the season months on stage |
+| Help text is 15 bullets | A new user sees everything at once instead of the three-photo loop | Show the loop first, the rest behind "help more" |
+| Paper receipts untested | Order intake was built for online order screenshots; store receipts abbreviate item names | Try one real receipt; tune the order prompt if needed |
 | Listing detection tested only on rendered pages | Real retailer screenshots (Zara, Uniqlo apps) may look different | Try 3–4 real listing screenshots during the rehearsal |
 
 ## Suggested next steps, in order
 
-**Feature freeze now.** The plan's freeze is hour 19; with P0, P1 and three of four P2 items built, more features add demo risk without adding much a judge will see in 2 minutes. Remaining time goes to reliability and the submission.
+**Feature freeze.** The MVP is built; what's left is proving it live and the submission.
 
-1. **Seed and rehearse on a real phone.** Neon branch, `bun run seed:demo`, merge duplicates with the editor, then the demo script: a fit check, a correction, a real order screenshot, a real store listing, "do I have this?" ending on the CO₂ line, "check my closet", and "my recap" as the closer. Time each reply; RCS replies take 25–40s, iMessage is faster.
-2. **README pass for the LLM judge:** architecture (models for perception, code for state and numbers), the evals (router 60/61, closet 50/50 found, 6/6 shopping matches, model comparison), the failures found and fixed, CO₂ sources, and a "why not just ask ChatGPT?" section.
-3. **Demo safety:** a fallback provider for photo calls; record the backup video.
-4. **Make the repo public when the Devpost is created.**
-5. The rest of the submission checklist (Devpost, Figma, screenshots incl. the recap card, sponsor requirements, two pitch run-throughs). Nessie only if entering that track.
+1. **Live run on a real phone (team):** a fit check and a correction; a real store-app screenshot (Zara, Uniqlo, Depop) and "I didn't skip it"; a **paper receipt** and an online order screenshot, then "check returns"; "my recap", "check my closet", "my impact", "stop". Note anything odd.
+2. **Simplify the help text** to the three-photo loop, with the rest behind "help more" (Claude, ~15 min).
+3. **Fallback provider for photo calls** (Claude, ~30 min).
+4. **Seed demo data** on a Neon branch (`bun run seed:demo`), merge duplicates with the editor.
+5. **README pass** for the LLM judge: the three-photo loop, architecture (models perceive, code remembers and counts), evals (router 61/62, closet 50/50 found, 6/6 shopping matches, model comparison), failures found and fixed, CO₂ sources, "why not just ask ChatGPT?".
+6. **Demo script** (the confession, the sweatpants, the screenshot, the recap) and two run-throughs; record the backup video.
+7. **Devpost** (then make the repo public), Figma, screenshots incl. the recap card, sponsor requirements. Nessie only if entering that track.
