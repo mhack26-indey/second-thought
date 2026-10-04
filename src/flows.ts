@@ -3,12 +3,12 @@ import { type ImageInput, type MediaType, visionEnabled } from "./closet/vlm.ts"
 import { type City, cityFrom, findCities } from "./cities.ts";
 import { exactGroups, findItemByName, llmGroups } from "./match.ts";
 import { addItemToOutfit, deleteFitCheck, itemsOnlyIn, linkItem, mergeItems, relabelItem, unlinkItem } from "./fit-edits.ts";
-import { WINDOW_DAYS, worthBuyingResult } from "./gaps.ts";
+import { WINDOW_DAYS } from "./gaps.ts";
 import { type BotReply, type RecentFitCheck, ShoppingMode, isShoppingCaption } from "./shopping-mode.ts";
 import { readClosetPhoto, readPhoto } from "./photo-intake.ts";
 import { ClosetMode } from "./closet-mode.ts";
 import { answerDeclutter, declutterPicks, declutterReplies, isDeclutterAsk, saveDeclutterList } from "./declutter.ts";
-import { PROFILE_QUESTION, type ProfilePatch, budgetLine, describePatch, nextProfileStep, occasionNotes, parseProfile, quickProfileEdit, reaskQuestion, saveProfile } from "./profile.ts";
+import { PROFILE_QUESTION, type ProfilePatch, buyAdvice, describePatch, nextProfileStep, parseProfile, quickProfileEdit, reaskQuestion, saveProfile } from "./profile.ts";
 import { answerFromCloset } from "./ask.ts";
 import { climateFor } from "./climate.ts";
 import { SNOOZE_DAYS, UNWORN_DAYS, findGhosts, ghostQuestion, markAsked, parseCheckinAnswer, pendingCheckin, setCheckin } from "./ghosts.ts";
@@ -417,12 +417,7 @@ async function runAction(user: User, action: Action, listed: Reminder[], text = 
         console.error("color grouping failed", err);
         return exactGroups;
       });
-      // What their week needs comes first (profile.ts), checked against everything they own.
-      const notes = occasionNotes(user.occasions, await listItems(user.id), wears);
-      const gap = worthBuyingResult(wears, groups);
-      // Budget framing (age range) only when there's something to buy; it never changes what.
-      const budget = notes.length || gap.buy ? budgetLine(user.ageRange) : null;
-      return [[...notes, gap.text, budget].filter(Boolean).join("\n")];
+      return [buyAdvice(wears, await listItems(user.id), groups, user)];
     }
 
     case "show_profile": {

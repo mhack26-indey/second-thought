@@ -6,7 +6,6 @@ import type { Db } from "./db/client.ts";
 import { testDb } from "./db/test-db.ts";
 import {
   NOTHING_TO_CLEAR,
-  SOLD_HINT,
   answerDeclutter,
   declutterPicks,
   declutterReplies,
@@ -124,6 +123,24 @@ test("a pick that can still go back says to return it, and comes first", async (
   expect(picks.map((p) => p.itemId)).toContain(spare.id);
 });
 
+test("an order that can still go back only needs a week before it's offered back", async () => {
+  const order = async (orderDate: string, deadline: string) => {
+    const [p] = await db.query<{ id: string }>(
+      `INSERT INTO purchases (user_id, retailer, price, order_date, return_deadline, status) VALUES ('u1', 'Zara', 69.9, $1, $2, 'kept') RETURNING id`,
+      [orderDate, deadline],
+    );
+    return p!.id;
+  };
+  const jacket = await owns(piece("jacket", "outerwear", "green", "green cropped utility jacket"), "2026-06-20", { purchase_id: await order("2026-06-20", "2026-07-20") });
+  const fresh = await owns(piece("jacket", "outerwear", "black", "black bomber jacket"), "2026-07-12", { purchase_id: await order("2026-07-12", "2026-08-11") });
+
+  const picks = await declutterPicks(db, "u1", ANN_ARBOR, new Date("2026-07-15T12:00:00Z"));
+  expect(picks.map((p) => p.itemId)).toEqual([jacket.id]); // 25 days old: offered back; 3 days old: not yet
+  expect(picks[0]!.exit.text).toBe("Return it by Jul 20 (Zara) and get your money back");
+  expect(declutterReplies(picks).at(-1)).toContain("Reply 'returned 1' once it's sent back.");
+  expect(fresh.id).toBeGreaterThan(0);
+});
+
 test("anything added or worn in the last 30 days is left alone", async () => {
   await owns(tee, "2026-07-01"); // added 2 weeks ago, never worn
   const worn = await owns(polo, "2026-03-01");
@@ -164,7 +181,7 @@ test("the reply sends the top pick's photo, one line each, and how to report it"
   const replies = declutterReplies(picks);
   expect(replies[0]).toEqual({ photo: "https://example.test/t-shirt.jpg" });
   expect(replies[1]).toBe(
-    ["Here's what you could let go:", "1. plain white crew-neck tee: Never worn since you added it in January. Donate it: plain basics rarely resell.", SOLD_HINT].join("\n"),
+    ["Here's what you could let go:", "1. plain white crew-neck tee: Never worn since you added it in January. Donate it: plain basics rarely resell.", "Reply 'sold 1' or 'donated 1' when it's gone."].join("\n"),
   );
 });
 

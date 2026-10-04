@@ -6,39 +6,28 @@ import type { Recap } from "./recap.ts";
 
 // The recap as a shareable image (1080×1350, portrait, like a story post):
 // laid out with Satori (flexbox to SVG, no browser), rendered to PNG by resvg.
-// Styled to docs/design-system.md: a primary-gradient rounded panel (the
-// testimonial card), Merriweather 700 for figures and titles, Inter 400 for
-// everything else. Fonts: SIL Open Font License (assets/fonts/OFL.txt,
-// assets/fonts/Merriweather-OFL.txt).
+// Styled to docs/DESIGN-nike.md: white canvas, one towering uppercase display
+// figure, flat soft-gray tiles, photos staged on gray, black pills. Fonts (SIL
+// Open Font License, assets/fonts): Bebas Neue for display, Inter 400/500.
 
 const W = 1080;
 const H = 1350;
-const C = {
-  bg: "#f5fcef",
-  bgDim: "#ebf2e5",
-  primary: "#a1cc80",
-  secondary: "#95e8cf",
-  darker: "#789960",
-  superdark: "#506640",
-  ink: "#25400c", // --neutral: dark green text on primary
-  muted: "#506640",
-  card: "rgba(245, 252, 239, 0.82)",
-};
-const SERIF = "Merriweather";
+const C = { canvas: "#ffffff", cloud: "#f5f5f5", ink: "#111111", charcoal: "#39393b", mute: "#707072", hairline: "#e5e5e5" };
+const DISPLAY = "Bebas Neue";
 const SANS = "Inter";
 
-let fonts: { name: string; data: ArrayBuffer; weight: 400 | 700; style: "normal" }[] | undefined;
+let fonts: { name: string; data: ArrayBuffer; weight: 400 | 500; style: "normal" }[] | undefined;
 async function loadFonts() {
   const file = (name: string) => Bun.file(new URL(`../assets/fonts/${name}`, import.meta.url)).arrayBuffer();
   fonts ??= [
-    { name: SANS, weight: 400, style: "normal", data: await file("Inter-400.ttf") },
-    { name: SERIF, weight: 700, style: "normal", data: await file("Merriweather-700.woff") },
-    // Glyphs Merriweather's Latin subset lacks (₂, ≈) fall back to Inter.
-    { name: SANS, weight: 700, style: "normal", data: await file("Inter-800.ttf") },
+    { name: SANS, weight: 400, style: "normal", data: await file("Inter-400.ttf") }, // full glyph set: ₂, ≈, “ ”
+    { name: SANS, weight: 500, style: "normal", data: await file("Inter-500.woff") },
+    { name: DISPLAY, weight: 400, style: "normal", data: await file("BebasNeue-400.woff") },
   ];
   return fonts;
 }
-const serif = { fontFamily: SERIF, fontWeight: 700 };
+const display = { fontFamily: DISPLAY, fontWeight: 400, lineHeight: 0.9 };
+const medium = { fontWeight: 500 };
 
 // Where an item usually is in a full-length outfit photo.
 const FOCUS: Record<string, string> = {
@@ -61,9 +50,9 @@ const text = (s: string, style: Record<string, unknown> = {}) => h("div", style,
 function tile(value: string, label: string): Node {
   return h(
     "div",
-    { flexDirection: "column", flex: 1, background: C.card, borderRadius: 32, padding: "28px 30px" },
-    text(value, { ...serif, fontSize: 60, lineHeight: 1 }),
-    text(label, { fontSize: 26, color: C.muted, marginTop: 12 }),
+    { flexDirection: "column", flex: 1, background: C.cloud, padding: "24px 26px 22px" },
+    text(value, { ...display, fontSize: 84 }),
+    text(label, { ...medium, fontSize: 24, color: C.mute, marginTop: 10 }),
   );
 }
 
@@ -87,56 +76,53 @@ export async function recapPng(r: Recap, photos: Record<string, CardPhoto> = {})
       ? h(
           "div",
           { flexDirection: "column" },
-          text(`≈ ${Math.round(r.co2Kg)} kg CO₂e`, { ...serif, fontSize: 96, color: C.ink, letterSpacing: -2, lineHeight: 1.05 }),
-          text(`saved by not buying new · ${describeKg(r.co2Kg).replace(/^≈ \d+ kg CO₂e \(about (.*)\)$/, "about $1")}`, {
-            fontSize: 30,
-            color: C.muted,
-            marginTop: 14,
-          }),
+          h("div", { alignItems: "flex-end", gap: 24 }, text(`${Math.round(r.co2Kg)}`, { ...display, fontSize: 220 }), text("KG CO2E SAVED", { ...display, fontSize: 76, marginBottom: 18 })),
+          text(`by not buying new · ${describeKg(r.co2Kg).replace(/^≈ \d+ kg CO₂e \(about (.*)\)$/, "about $1")}`, { ...medium, fontSize: 28, color: C.mute, marginTop: 4 }),
         )
       : h(
           "div",
           { flexDirection: "column" },
-          text(`${r.fitChecks} fit check${r.fitChecks === 1 ? "" : "s"}`, { ...serif, fontSize: 96, letterSpacing: -2, lineHeight: 1.05 }),
-          text("and every piece remembered", { fontSize: 30, color: C.muted, marginTop: 14 }),
+          h("div", { alignItems: "flex-end", gap: 24 }, text(String(r.fitChecks), { ...display, fontSize: 220 }), text(r.fitChecks === 1 ? "FIT CHECK" : "FIT CHECKS", { ...display, fontSize: 76, marginBottom: 18 })),
+          text("and every piece remembered", { ...medium, fontSize: 28, color: C.mute, marginTop: 4 }),
         );
 
   const third = r.moneyBack > 0 ? tile(money(r.moneyBack), "back from returns and sales") : tile(String(r.skipped), r.skipped === 1 ? "purchase skipped" : "purchases skipped");
 
-  // The favorite in each category, two by two, each photo cropped to where that kind of item sits.
+  const label = (s: string) => text(s, { ...medium, fontSize: 22, letterSpacing: 3, color: C.mute });
+
+  // The favorite in each category, two by two: the photo staged on gray, cropped to where that kind of item sits.
   const favorite = (f: Recap["favorites"][number]) => {
     const photo = f.photoUrl ? photos[f.photoUrl] : null;
     const usable = photo && /^image\/(png|jpe?g)$/.test(photo.mimeType);
     return h(
       "div",
-      { width: 432, height: 176, background: C.card, borderRadius: 16, overflow: "hidden" },
-      usable
-        ? {
-            type: "img",
-            props: {
-              src: `data:${photo!.mimeType};base64,${photo!.base64}`,
-              width: 132,
-              height: 176,
-              style: { objectFit: "cover", objectPosition: FOCUS[f.category] ?? "center" },
-            },
-          }
-        : null,
+      { width: 448, height: 156, gap: 20, alignItems: "center" },
       h(
         "div",
-        { flexDirection: "column", justifyContent: "center", padding: "0 24px", flex: 1 },
-        text(LABELS[f.category] ?? f.category.toUpperCase(), { fontSize: 18, letterSpacing: 3, color: C.muted }),
-        text(f.description, { ...serif, fontSize: 24, marginTop: 8, lineHeight: 1.25 }),
-        h("div", { marginTop: 10 }, text(`worn ${f.wears}×`, { fontSize: 20, color: C.ink, background: C.primary, borderRadius: 999, padding: "4px 16px" })),
+        { width: 124, height: 156, background: C.cloud, overflow: "hidden" },
+        usable
+          ? {
+              type: "img",
+              props: {
+                src: `data:${photo!.mimeType};base64,${photo!.base64}`,
+                width: 124,
+                height: 156,
+                style: { objectFit: "cover", objectPosition: FOCUS[f.category] ?? "center" },
+              },
+            }
+          : null,
+      ),
+      h(
+        "div",
+        { flexDirection: "column", flex: 1 },
+        text(LABELS[f.category] ?? f.category.toUpperCase(), { ...medium, fontSize: 18, letterSpacing: 3, color: C.mute }),
+        text(f.description, { ...medium, fontSize: 26, marginTop: 6, lineHeight: 1.2 }),
+        h("div", { marginTop: 12 }, text(`WORN ${f.wears}×`, { ...medium, fontSize: 18, letterSpacing: 1, color: C.canvas, background: C.ink, borderRadius: 999, padding: "6px 16px" })),
       ),
     );
   };
   const mostWorn = r.favorites.length
-    ? h(
-        "div",
-        { flexDirection: "column", gap: 16 },
-        text("MOST WORN", { fontSize: 22, letterSpacing: 4, color: C.muted }),
-        h("div", { flexWrap: "wrap", gap: 20 }, ...r.favorites.map(favorite)),
-      )
+    ? h("div", { flexDirection: "column", gap: 16 }, label("MOST WORN"), h("div", { flexWrap: "wrap", gap: 20 }, ...r.favorites.map(favorite)))
     : null;
 
   const shown = r.ghosts.slice(0, 3);
@@ -145,56 +131,47 @@ export async function recapPng(r: Recap, photos: Record<string, CardPhoto> = {})
       ? h(
           "div",
           { flexDirection: "column" },
-          text("NEW IN YOUR CLOSET", { fontSize: 22, letterSpacing: 4, color: C.muted }),
-          text(`${r.newItems} piece${r.newItems === 1 ? "" : "s"} logged from your fit checks`, { fontSize: 32, marginTop: 12 }),
-          text("Every one of them counts toward what you already own.", { fontSize: 26, color: C.muted, marginTop: 8 }),
+          label("NEW IN YOUR CLOSET"),
+          text(`${r.newItems} piece${r.newItems === 1 ? "" : "s"} logged from your fit checks`, { ...medium, fontSize: 32, marginTop: 12 }),
+          text("Every one of them counts toward what you already own.", { fontSize: 26, color: C.mute, marginTop: 8 }),
         )
       : null;
   const ghosts = r.ghosts.length
     ? h(
         "div",
         { flexDirection: "column" },
-        text("DIDN'T GET WORN", { fontSize: 22, letterSpacing: 4, color: C.muted }),
+        label("DIDN'T GET WORN"),
         text(shown.join(" · ") + (r.ghosts.length > shown.length ? ` · +${r.ghosts.length - shown.length} more` : ""), {
+          ...medium,
           fontSize: 32,
           marginTop: 12,
           lineHeight: 1.3,
         }),
-        text("Wear it, or let it go to someone who will.", { fontSize: 26, color: C.muted, marginTop: 8 }),
+        text("Wear it, or let it go to someone who will.", { fontSize: 26, color: C.mute, marginTop: 8 }),
       )
     : null;
 
-  // A mint page with the gradient panel on it, rounded like a testimonial card.
-  const panel = h(
+  const card = h(
     "div",
-    {
-      flex: 1,
-      flexDirection: "column",
-      gap: 24,
-      padding: "46px 60px 40px",
-      borderRadius: 48,
-      backgroundImage: `linear-gradient(150deg, ${C.primary} 0%, ${C.secondary} 100%)`,
-      boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
-    },
+    { width: W, height: H, background: C.canvas, color: C.ink, fontFamily: SANS, flexDirection: "column", padding: "44px 72px 40px", gap: 26 },
     h(
       "div",
-      { justifyContent: "space-between", alignItems: "center" },
-      text("Second Thought", { ...serif, fontSize: 30 }),
-      text(r.title, { fontSize: 28, color: C.muted }),
+      { justifyContent: "space-between", alignItems: "center", paddingBottom: 22, borderBottom: `2px solid ${C.hairline}` },
+      text("SECOND THOUGHT", { ...display, fontSize: 44, letterSpacing: 1 }),
+      text(r.title, { ...medium, fontSize: 26, color: C.mute }),
     ),
     hero,
-    h("div", { gap: 20 }, tile(String(r.fitChecks), r.fitChecks === 1 ? "fit check" : "fit checks"), tile(`${r.itemsWorn}/${r.closetSize}`, "pieces worn"), third),
+    h("div", { gap: 12 }, tile(String(r.fitChecks), r.fitChecks === 1 ? "fit check" : "fit checks"), tile(`${r.itemsWorn}/${r.closetSize}`, "pieces worn"), third),
     mostWorn,
     ghosts ?? fresh,
     h(
       "div",
-      { flexDirection: "column", marginTop: "auto", borderTop: `2px solid rgba(37, 64, 12, 0.18)`, paddingTop: 22 },
-      text("“The most sustainable garment is the one already in your wardrobe.”", { ...serif, fontSize: 24, lineHeight: 1.35 }),
-      text("— Orsola de Castro, co-founder of Fashion Revolution", { fontSize: 22, color: C.muted, marginTop: 8 }),
-      text("CO₂ is an estimate: Carbonfact category averages; driving from the EPA.", { fontSize: 20, color: C.muted, marginTop: 10 }),
+      { flexDirection: "column", marginTop: "auto", borderTop: `2px solid ${C.hairline}`, paddingTop: 22 },
+      text("“The most sustainable garment is the one already in your wardrobe.”", { ...medium, fontSize: 24, lineHeight: 1.35 }),
+      text("— Orsola de Castro, co-founder of Fashion Revolution", { fontSize: 21, color: C.mute, marginTop: 6 }),
+      text("CO₂ is an estimate: Carbonfact category averages; driving from the EPA.", { fontSize: 19, color: C.mute, marginTop: 8 }),
     ),
   );
-  const card = h("div", { width: W, height: H, background: C.bg, color: C.ink, fontFamily: SANS, padding: 36 }, panel);
 
   const svg = await satori(card as any, { width: W, height: H, fonts: await loadFonts() });
   return new Resvg(svg, { fitTo: { mode: "width", value: W } }).render().asPng();

@@ -1,5 +1,5 @@
 import { GUIDE, type GuideEntry, LOOP } from "./guide.ts";
-import { BOT_NUMBER_DISPLAY, FONTS, START_LINK, STYLE, esc, svg, tabs } from "./web-style.ts";
+import { BOT_NUMBER_DISPLAY, FONTS, START_LINK, STYLE, esc, publicNav, svg, tabs } from "./web-style.ts";
 
 // The usage guide as a page: per user at /w/<token>/guide (a tab next to the
 // closet), and public at /guide for people who haven't signed up, with the
@@ -12,34 +12,40 @@ const LOOP_ICONS: Record<(typeof LOOP)[number]["icon"], string> = {
 };
 
 const CSS = `
-  .lede { color: var(--muted); margin: 0 0 15px; }
-  .loop { display: grid; gap: 10px; margin: 0 0 15px; padding: 0; list-style: none; }
-  .loop li { display: flex; gap: 15px; align-items: flex-start; padding: 15px; border-radius: var(--r-panel); background: var(--bg-dim); animation: fade .4s ease both; animation-delay: calc(var(--i) * 60ms); }
-  .loop .ico { flex: none; width: 48px; height: 48px; display: grid; place-items: center; border-radius: var(--r-btn); background: var(--primary-darker); color: var(--bg); }
-  .loop h3 { font-size: 1rem; margin: 2px 0 2px; }
-  .loop p { margin: 0; font-size: .9375rem; }
-  @media (min-width: 560px) { .loop .ico { width: 64px; height: 64px; border-radius: var(--r-panel); } }
-  .toc { display: flex; flex-wrap: wrap; gap: 5px; margin: 10px 0 0; }
-  .toc a { font-size: .8125rem; padding: 4px 12px; border-radius: var(--r-pill); background: var(--bg-dim); color: var(--neutral); text-decoration: none; }
-  .cmds { display: grid; gap: 0; }
-  .cmds li { padding: 12px 15px; border-radius: var(--r-card); }
-  .cmds li:nth-child(odd) { background: var(--bg-dim); }
-  .cmd-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-  .cmd { display: inline-block; padding: 4px 14px; border-radius: 18px; background: var(--primary); color: var(--neutral); font-family: var(--sans); font-weight: 700; font-size: .9375rem; line-height: 1.45; overflow-wrap: anywhere; }
-  .cmd.photo { background: var(--secondary); font-weight: 400; }
-  .copy { flex: none; margin-top: 2px; padding: 3px 10px; font-size: .75rem; font-weight: 400; border-radius: var(--r-pill); background: transparent; color: var(--primary-darkest); border: 1px solid var(--bg-dimmer); }
-  .copy:hover { background: #fff; color: var(--neutral); }
-  .copy.done { background: var(--primary-superdark); color: var(--bg); border-color: transparent; }
-  .does { margin: 6px 0 0; }
-  .reply { margin: 6px 0 0; padding: 6px 12px; border-radius: 14px 14px 14px 4px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.08); color: var(--text); font-size: .875rem; width: fit-content; max-width: 100%; }
-  .reply::before { content: "Bot: "; color: var(--muted); }
-  .brandbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 0 0 15px; }
-  .brandbar a.home { font-family: var(--serif); font-weight: 700; color: var(--neutral); text-decoration: none; }
-  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 8px 18px; border-radius: var(--r-pill); background: var(--primary); color: var(--neutral); font-weight: 700; text-decoration: none; box-shadow: var(--shadow-sm); transition: transform var(--ease); }
-  .pill:active { transform: scale(.95); }
-  .start { margin: 30px 0 0; padding: 20px; border-radius: var(--r-panel); background: var(--ink); color: var(--bg); text-align: center; }
-  .start h2 { color: var(--primary); margin: 0 0 10px; }
-  .start p { margin: 0 0 15px; }
+  .lede { color: var(--charcoal); margin: 0 0 18px; font-size: 18px; max-width: 36ch; animation: rise .5s var(--ease) .06s both; }
+  /* The three-photo loop: numbered soft-gray cards. */
+  .loop { display: grid; gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
+  .loop li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 18px; align-items: start; padding: 24px; background: var(--cloud); animation: rise .5s var(--ease) both; animation-delay: calc(var(--i) * 70ms + 100ms); }
+  .loop .num { grid-row: span 2; font-family: var(--display); font-size: 44px; line-height: .85; }
+  .loop .ico { display: none; }
+  .loop h3 { font-size: 18px; }
+  .loop p { margin: 0; color: var(--charcoal); font-size: 15px; }
+  @media (min-width: 680px) { .loop { grid-template-columns: repeat(3, 1fr); } .loop li { grid-template-columns: 1fr; } .loop .num { grid-row: auto; margin-bottom: 12px; } }
+  /* Section jump links: outlined chips that scroll sideways on a phone. */
+  .toc { display: flex; gap: 8px; margin: 18px -16px 0; padding: 0 16px 4px; overflow-x: auto; scrollbar-width: none; }
+  .toc a { flex: none; display: inline-flex; align-items: center; height: 40px; padding: 0 16px; border: 1px solid var(--hairline); border-radius: var(--r-pill); font-size: 14px; font-weight: 500; text-decoration: none;
+    transition: border-color .2s var(--ease), background-color .2s var(--ease), color .2s var(--ease); }
+  .toc a:hover { border-color: var(--ink); }
+  .toc a:active { background: var(--ink); color: var(--canvas); }
+  section { scroll-margin-top: 64px; }
+  /* Commands: hairline rows; the command as a chip, a round copy button. */
+  .cmds { border-top: 1px solid var(--hairline-soft); }
+  .cmds li { padding: 18px 0; border-bottom: 1px solid var(--hairline-soft); }
+  .cmd-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .cmd { display: inline-block; padding: 7px 16px; border: 1px solid var(--hairline); border-radius: 20px; background: var(--canvas); color: var(--ink); font: 500 15px/1.4 var(--sans); overflow-wrap: anywhere; }
+  .cmd.photo { background: var(--cloud); border-color: var(--cloud); }
+  .copy { flex: none; height: 36px; padding: 0 14px; font-size: 13px; background: var(--cloud); color: var(--ink); }
+  .copy:hover { opacity: 1; background: var(--cloud-press); }
+  .copy.done { background: var(--success); color: var(--canvas); }
+  .does { margin: 8px 0 0; color: var(--charcoal); }
+  /* An example reply, like an incoming message. */
+  .reply { margin: 8px 0 0; padding: 8px 14px; border-radius: 18px 18px 18px 4px; background: var(--cloud); color: var(--ink); font-size: 14px; width: fit-content; max-width: 100%; }
+  .reply::before { content: "Bot · "; color: var(--mute); font-weight: 500; }
+  /* Signing up: a black campaign tile. */
+  .start { margin: var(--section) -16px 0; padding: 40px 16px; background: var(--ink); color: var(--canvas); }
+  .start h2 { font-family: var(--display); font-weight: 400; text-transform: uppercase; font-size: 56px; line-height: .9; color: var(--canvas); margin: 0 0 12px; }
+  .start p { margin: 0 0 24px; color: var(--stone); }
+  @media (min-width: 760px) { .start { margin-left: 0; margin-right: 0; padding: 48px; } }
 `;
 
 const anchor = (title: string) => title.toLowerCase().replace(/[^a-z]+/g, "-").replace(/^-|-$/g, "");
@@ -55,9 +61,9 @@ function entry(e: GuideEntry): string {
 export function guidePage(token?: string): string {
   const header = token
     ? `${tabs(token, "guide")}<h1>How it works</h1>`
-    : `<div class="brandbar"><a class="home" href="/">Second Thought</a><a class="pill shine" href="${esc(START_LINK)}">Text the bot</a></div><h1>How it works</h1>`;
+    : `${publicNav()}<h1>How it works</h1>`;
   const loop = LOOP.map(
-    (l, i) => `<li style="--i:${i}"><i class="ico">${svg(LOOP_ICONS[l.icon], 28)}</i><div><h3>${esc(l.title)}</h3><p>${esc(l.line)}</p></div></li>`,
+    (l, i) => `<li style="--i:${i}"><span class="num">0${i + 1}</span><i class="ico">${svg(LOOP_ICONS[l.icon], 28)}</i><div><h3>${esc(l.title)}</h3><p>${esc(l.line)}</p></div></li>`,
   ).join("");
   const sections = GUIDE.map(
     (s) => `<section id="${anchor(s.title)}"><h2>${esc(s.title)}</h2><ul class="cmds">${s.entries.map(entry).join("")}</ul></section>`,
@@ -65,7 +71,7 @@ export function guidePage(token?: string): string {
   const toc = GUIDE.map((s) => `<a href="#${anchor(s.title)}">${esc(s.title)}</a>`).join("");
   const signup = token
     ? ""
-    : `<div class="start"><h2>Try it</h2><p>No app, no account. Text the bot and send your first fit check.</p><a class="pill shine" href="${esc(START_LINK)}">Text ${esc(BOT_NUMBER_DISPLAY)}</a></div>`;
+    : `<div class="start"><h2>Try it.</h2><p>No app, no account. Text the bot and send your first fit check.</p><a class="pill pill-light" href="${esc(START_LINK)}">Text ${esc(BOT_NUMBER_DISPLAY)} <span class="arrow" aria-hidden="true">→</span></a></div>`;
 
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">

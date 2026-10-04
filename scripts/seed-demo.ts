@@ -98,5 +98,19 @@ if (result.misread.length) {
   console.warn(`Ingested as fit checks although the model said otherwise: ${result.misread.map((m) => `${m.file} (${m.kind})`).join(", ")}`);
 }
 console.log(`Wardrobe page: ${PUBLIC_URL}/w/${result.webToken}`);
+
+// What the bot would say to the two recommendation texts, from this closet and profile.
+const { demoReplies } = await import("../src/demo-seed.ts");
+const { climateFor } = await import("../src/climate.ts");
+const { exactGroups, llmGroups } = await import("../src/match.ts");
+const city = process.env.DEMO_CITY?.trim() || "Ann Arbor, Michigan";
+const climate = await climateFor(db, city).catch((err) => {
+  console.warn(`No climate for ${city} (${err}); seasonal picks are skipped.`);
+  return undefined;
+});
+const replies = await demoReplies(db, userId, { climate, groups: (wears) => llmGroups(wears).catch(() => exactGroups) });
+const show = (r: unknown) => (typeof r === "string" ? r : `[photo: ${(r as { photo: string }).photo}]`);
+console.log(`\n> what should I buy for winter?\n${replies.buy}`);
+console.log(`\n> what should I get rid of?\n${replies.declutter.map(show).join("\n")}`);
 await sql.close();
 process.exit(0);

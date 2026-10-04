@@ -10,6 +10,7 @@ import { exactGroups } from "./match.ts";
 import {
   type ProfileAnswer,
   budgetLine,
+  buyAdvice,
   deleteUserRows,
   getProfile,
   nextProfileStep,
@@ -168,6 +169,25 @@ test("links carry their size", async () => {
     "https://www.depop.com/search/?q=navy%20polo%20size%20M",
     "https://www.ebay.com/sch/i.html?_nkw=navy%20polo%20size%20M",
   ]);
+});
+
+test('"what should I buy?" links a secondhand search in their size', () => {
+  const wear = (id: number, outfit: number, category: string, color: string) =>
+    ({ id, outfit_id: outfit, category, type: category === "top" ? "t-shirt" : "jeans", color_primary: color, description: category }) as Item & { outfit_id: number };
+  // Same black tee with four different pairs of pants: a top is what's missing.
+  const wears = [1, 2, 3, 4].flatMap((o) => [wear(1, o, "top", "black"), wear(10 + o, o, "bottom", "blue")]);
+  const sizes = { sizeTop: "S", sizeBottom: "S", sizeShoe: null };
+  const reply = buyAdvice(wears, [], exactGroups, { occasions: null, ageRange: "18-24", ...sizes });
+  expect(reply).toContain("A white top would go with all of them");
+  expect(reply).toContain("Check secondhand first");
+  expect(reply).toContain("Secondhand white top: https://www.depop.com/search/?q=white%20top%20size%20S · eBay: https://www.ebay.com/sch/i.html?_nkw=white%20top%20size%20S");
+
+  // Gym with no athletic shoes: a search for those too, with no size when they gave no shoe size.
+  const withGym = buyAdvice(wears, [], exactGroups, { occasions: ["gym"], ageRange: null, ...sizes });
+  expect(withGym).toContain("Secondhand training shoes: https://www.depop.com/search/?q=training%20shoes ·");
+  // A pair of Nikes counts as athletic: never suggest buying what they may own.
+  const nikes = { id: 99, category: "shoes", type: "sneakers", description: "black nike sneakers with white sole" } as Item;
+  expect(occasionNotes(["gym"], [nikes], [nikes])).toEqual([]);
 });
 
 test("delete my data takes the profile with it", async () => {

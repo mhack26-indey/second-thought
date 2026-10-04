@@ -5,7 +5,9 @@ import { activeItems, insertItem } from "./closet/repo.ts";
 import type { ImageInput } from "./closet/vlm.ts";
 import type { Db } from "./db/client.ts";
 import { testDb } from "./db/test-db.ts";
-import { type DemoOptions, photoDate, scheduleDemoPhotos, seedDemo } from "./demo-seed.ts";
+import { DEMO_PROFILE, type DemoOptions, demoReplies, photoDate, scheduleDemoPhotos, seedDemo } from "./demo-seed.ts";
+import type { Climate } from "./climate.ts";
+import { getProfile } from "./profile.ts";
 import { impactTotals } from "./impact.ts";
 import { exactMatcher } from "./ingest.ts";
 import { claimNudges } from "./returns.ts";
@@ -85,6 +87,37 @@ test("photos are read and deduped like live fit checks", async () => {
   expect(nudge!.text).toBe(
     `You haven't worn the green cropped utility jacket from Zara in any fit checks yet. Return window closes ${formatDay(addDays(today, 5))}. Keeping it? Reply keep or return.`,
   );
+});
+
+test("the demo user is Inesh, and both recommendations make sense for the seeded closet", async () => {
+  await seedDemo(db, options());
+  expect(await getProfile(db, DEMO)).toEqual({
+    name: "Inesh",
+    ageRange: "18-24",
+    occasions: ["class", "gym", "going out"],
+    sizeTop: "S",
+    sizeBottom: "S",
+    sizeShoe: null,
+  });
+  expect(DEMO_PROFILE.sizeShoe).toBeNull();
+
+  // An Ann Arbor-like climate (jackets in season from October).
+  const climate: Climate = { city: "Ann Arbor, Michigan", countryCode: "US", highsC: [0, 2, 8, 15, 22, 27, 29, 28, 24, 17, 9, 3], lowsC: Array(12).fill(0) };
+  const { buy, declutter } = await demoReplies(db, DEMO, { climate });
+
+  // No shoes in the stubbed photos and the gym in their week: training shoes, secondhand first,
+  // with no size in the link (no shoe size given). Framed for 18–24, never changing what's suggested.
+  expect(buy).toContain("You go to the gym, but I don't see athletic shoes in your closet.");
+  expect(buy).toContain("Check secondhand first");
+  expect(buy).toContain("Secondhand training shoes: https://www.depop.com/search/?q=training%20shoes ·");
+  // Every closet piece was worn in the last three weeks; the never-worn Zara order is the one to send back.
+  expect(declutter).toEqual([
+    [
+      "Here's what you could let go:",
+      `1. green cropped utility jacket: Never worn since you added it in ${new Date(addDays(today, -25) + "T12:00:00").toLocaleDateString("en-US", { month: "long" })}. Return it by ${formatDay(addDays(today, 5))} (Zara) and get your money back. Zara returns: https://www.zara.com/us/en/help-center/HowToReturn`,
+      "Reply 'returned 1' once it's sent back.",
+    ].join("\n"),
+  ]);
 });
 
 test("rerunning resets the demo user and leaves everyone else alone", async () => {
