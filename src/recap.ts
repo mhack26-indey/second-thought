@@ -10,7 +10,7 @@ export interface Recap {
   title: string; // "Your last 30 days", "September 2026"
   fitChecks: number;
   itemsWorn: number; // distinct items in the period's fit checks
-  closetSize: number; // active items now
+  closetSize: number; // pieces in the closet now (identical pieces count each)
   // The most-worn piece in each category (shoes always win overall, so it's per
   // category), worn at least twice, in CATEGORY_ORDER, at most four.
   favorites: { description: string; category: string; wears: number; photoUrl: string | null }[];
@@ -33,7 +33,7 @@ export async function buildRecap(db: Db, userId: string, from: string, to: strin
   const [counts] = await db.query<{ fit_checks: number; closet: number; new_items: number }>(
     `SELECT
        (SELECT count(*)::int FROM outfits WHERE user_id = $1 AND taken_on >= $2::date AND taken_on < $3::date) AS fit_checks,
-       (SELECT count(*)::int FROM items WHERE user_id = $1 AND status = 'active') AS closet,
+       (SELECT coalesce(sum(quantity), 0)::int FROM items WHERE user_id = $1 AND status = 'active') AS closet,
        (SELECT count(*)::int FROM items WHERE user_id = $1 AND created_at >= $2::date AND created_at < $3::date) AS new_items`,
     [userId, from, to],
   );

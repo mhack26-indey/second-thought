@@ -4,7 +4,7 @@ import type { ExtractedItem } from "./closet/extract.ts";
 import { activeItems, insertItem } from "./closet/repo.ts";
 import type { Db } from "./db/client.ts";
 import { testDb } from "./db/test-db.ts";
-import { impactReply, impactSummary, impactTotals, isImpactAsk, isUnskip, letGo, parseLetGo, tossMessage, undoLastSkip } from "./impact.ts";
+import { impactReply, impactSummary, impactTotals, isImpactAsk, isUnskip, letGo, parseLetGo, setQuantity, tossMessage, undoLastSkip } from "./impact.ts";
 import { exactMatcher } from "./ingest.ts";
 import { intakeOrder } from "./orders.ts";
 import { claimNudges, handleReturnsText } from "./returns.ts";
@@ -194,4 +194,21 @@ test("tossing says how long it lasted: short lives get the quality note, long on
   expect(tossMessage("gray hoodie", false, new Date("2023-09-01T12:00:00"), 140, now)).toBe(
     "Removed your gray hoodie. It had a good run: 3 years and 140 wears. Textile recycling keeps even broken clothes out of landfill.",
   );
+});
+
+test("several identical pieces: letting one go leaves the rest, the last one ends the item", async () => {
+  const tees = await insertItem(db, { ...jeans, user_id: "u1", source: "fit_check" });
+  expect(await setQuantity(db, "u1", tees.id, 3)).toBe(true);
+  expect(await setQuantity(db, "u1", tees.id, 0)).toBe(false);
+  expect(await setQuantity(db, "u2", tees.id, 2)).toBe(false); // not theirs
+
+  expect(await letGo(db, "u1", tees.id, "sold", 10)).toBe(true);
+  expect(await letGo(db, "u1", tees.id, "donated")).toBe(true);
+  let [left] = await activeItems(db, "u1");
+  expect(left!.quantity).toBe(1);
+  expect(await impactTotals(db, "u1")).toMatchObject({ sold: 1, donated: 1, recovered: 10 });
+
+  expect(await letGo(db, "u1", tees.id, "trashed")).toBe(true); // the last one
+  expect(await activeItems(db, "u1")).toHaveLength(0);
+  expect(await letGo(db, "u1", tees.id, "sold")).toBe(false); // gone
 });
