@@ -25,6 +25,7 @@ import { previousMonth } from "./recap.ts";
 import { recapFor } from "./recaps.ts";
 import { askCheckin } from "./flows.ts";
 import { startWebServer } from "./web.ts";
+import { fitForChat } from "./chat-photo.ts";
 
 // Spectrum bridges a single agent loop to many messaging interfaces.
 // Each provider in `providers` adds an interface (terminal TUI, iMessage, …).
@@ -244,16 +245,24 @@ for await (const [space, message] of app.messages) {
     // The typing bubble shows while the reply is worked out (the text model
     // takes a second or two), so a slow answer doesn't look like no answer.
     // A stored photo goes out as an image; a missing one is skipped.
+    // Each reply goes out on its own: one that fails (a photo the platform
+    // rejects) is logged and stands in for, never stopping the rest.
     const send = async (reply: Reply) => {
       const at = Date.now();
-      await sendReply(reply);
+      try {
+        await sendReply(reply);
+      } catch (err) {
+        console.error(`a reply to message ${message.id} failed to send`, err);
+        if (typeof reply !== "string") await space.send("(I couldn't send that photo here. It's on your wardrobe page.)").catch(() => {});
+      }
       timing.send += Date.now() - at;
     };
     const sendReply = async (reply: Reply) => {
       if (typeof reply === "string") return void (await space.send(reply));
       if ("image" in reply) return void (await space.send(attachment(Buffer.from(reply.image), { name: reply.name, mimeType: reply.mimeType })));
-      const photo = await photoAt(reply.photo);
-      if (!photo) return;
+      const stored = await photoAt(reply.photo);
+      if (!stored) return;
+      const photo = fitForChat(stored.image, stored.mimeType); // big phone photos are too big for chats
       const name = `fit-check.${photo.mimeType.split("/")[1] ?? "jpg"}`;
       await space.send(attachment(Buffer.from(photo.image), { name, mimeType: photo.mimeType }));
     };
