@@ -6,6 +6,12 @@ import { visionMatcher } from "./ingest.ts";
 import { matchSeenItems } from "./match.ts";
 import { type PhotoDeps, readPhoto } from "./photo-intake.ts";
 import type { Reply } from "./shopping-mode.ts";
+import type { Climate } from "./climate.ts";
+import { activeItems, recentWears } from "./closet/repo.ts";
+import { declutterPicks, declutterReplies } from "./declutter.ts";
+import { WINDOW_DAYS } from "./gaps.ts";
+import { type Groups, exactGroups } from "./match.ts";
+import { type Profile, buyAdvice, getProfile, saveProfile } from "./profile.ts";
 
 // Demo data for one user (scripts/seed-demo.ts), built from real outfit
 // photos the way a live fit check builds it: each photo goes through
@@ -18,6 +24,16 @@ import type { Reply } from "./shopping-mode.ts";
 // Rerunning wipes that user's data first (and only theirs).
 
 export const DEMO_DAYS = 21;
+
+/** The demo user's profile (profile.ts): what "what should I buy?" and the links use. */
+export const DEMO_PROFILE: Profile = {
+  name: "Inesh",
+  ageRange: "18-24",
+  occasions: ["class", "gym", "going out"],
+  sizeTop: "S",
+  sizeBottom: "S",
+  sizeShoe: null,
+};
 
 export interface DemoPhoto {
   file: string;
@@ -133,8 +149,10 @@ export async function seedDemo(db: Db, opts: DemoOptions): Promise<DemoResult> {
      ON CONFLICT (id) DO UPDATE SET step = 'done', name = $3, city = $4, fit_check_hour = 9,
        last_fit_ping = $5, last_fit_photo = $6, city_options = NULL
      RETURNING web_token`,
-    [opts.userId, crypto.randomUUID().replaceAll("-", ""), opts.name ?? "Sam", opts.city ?? "Ann Arbor, Michigan", today, day(1)],
+    [opts.userId, crypto.randomUUID().replaceAll("-", ""), opts.name ?? DEMO_PROFILE.name, opts.city ?? "Ann Arbor, Michigan", today, day(1)],
   );
+  const { name: _, ...details } = DEMO_PROFILE;
+  await saveProfile(db, opts.userId, details, { replaceOccasions: true });
 
   // Each photo as a live fit check, oldest first: saved, then read and
   // matched against the closet so far. These are known outfit photos, so a
@@ -248,4 +266,24 @@ export async function seedDemo(db: Db, opts: DemoOptions): Promise<DemoResult> {
       photos: (r.urls ?? []).map((u) => fileByUrl.get(u) ?? u),
     })),
   };
+}
+
+/**
+ * What the bot would answer the demo user, computed the same way: "what
+ * should I buy?" (buyAdvice, which "what should I buy for winter?" also
+ * routes to) and "what should I get rid of?" (declutter.ts, with their sizes
+ * in the links). The live bot groups colors with the text model; pass that
+ * in as `groups` to match it exactly.
+ */
+export async function demoReplies(
+  db: Db,
+  userId: string,
+  opts: { climate?: Climate; groups?: (wears: Awaited<ReturnType<typeof recentWears>>) => Promise<Groups>; today?: Date } = {},
+): Promise<{ buy: string; declutter: Reply[] }> {
+  const profile = (await getProfile(db, userId))!;
+  const wears = await recentWears(db, userId, WINDOW_DAYS);
+  const groups = opts.groups ? await opts.groups(wears) : exactGroups;
+  const buy = buyAdvice(wears, await activeItems(db, userId), groups, profile);
+  const declutter = declutterReplies(await declutterPicks(db, userId, opts.climate, opts.today ?? new Date(), profile));
+  return { buy, declutter };
 }

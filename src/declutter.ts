@@ -19,6 +19,7 @@ import type { Reply } from "./shopping-mode.ts";
 // donate a plain basic.
 
 export const RECENT_DAYS = 30;
+export const RETURNABLE_GRACE_DAYS = 7; // a returnable order gets a week to be worn first (as "check returns" does)
 export const TOP = 5;
 const SKIP = new Set(["accessory", "jewelry"]); // photos miss these, so "unworn" means little
 const BASICS = new Set(["t-shirt", "tank top", "leggings"]); // plain ones rarely resell
@@ -125,7 +126,12 @@ export async function declutterPicks(db: Db, userId: string, climate: Climate | 
   );
   const byId = new Map(rows.map((r) => [r.id, r]));
   const cutoff = new Date(today.getTime() - RECENT_DAYS * 86_400_000);
-  const settled = (r: Row) => new Date(r.created_at) <= cutoff && (r.last_worn === null || r.last_worn < ymd(cutoff));
+  const graced = new Date(today.getTime() - RETURNABLE_GRACE_DAYS * 86_400_000);
+  // Settled: added over 30 days ago and not worn in 30 days. An order that can
+  // still go back only needs a week, or a 30-day window would close before
+  // anything could suggest returning it.
+  const added = (r: Row) => new Date(r.created_at) <= (r.deadline ? graced : cutoff);
+  const settled = (r: Row) => added(r) && (r.last_worn === null || r.last_worn < ymd(cutoff));
   const month = today.getMonth();
 
   const found = new Map<number, { reasons: string[]; score: number }>();
@@ -168,7 +174,8 @@ export async function declutterPicks(db: Db, userId: string, climate: Climate | 
 
   // Never worn since it was added.
   for (const row of rows) {
-    if (row.wears > 0 || SKIP.has(row.category) || !settled(row) || !inSeason(row, climate, month)) continue;
+    // Off-season pieces wait for their season, unless they can still go back: the window won't wait.
+    if (row.wears > 0 || SKIP.has(row.category) || !settled(row) || (!row.deadline && !inSeason(row, climate, month))) continue;
     const added = new Date(row.created_at);
     add(row.id, `Never worn since you added it in ${MONTHS[added.getMonth()]}`, 1);
   }
@@ -193,6 +200,16 @@ export async function declutterPicks(db: Db, userId: string, climate: Climate | 
 export const NOTHING_TO_CLEAR = "Nothing to clear out. You're wearing what you own.";
 export const SOLD_HINT = "Reply 'sold 2' or 'donated 2' when it's gone.";
 
+/** How to report what happened, using numbers from this list ("sold 2" only if there's a 2 to sell). */
+function answerHints(picks: LetGoPick[]): string[] {
+  const resell = picks.findIndex((p) => p.exit.kind !== "return");
+  const back = picks.findIndex((p) => p.exit.kind === "return");
+  const hints: string[] = [];
+  if (resell >= 0) hints.push(resell === 1 ? SOLD_HINT : `Reply 'sold ${resell + 1}' or 'donated ${resell + 1}' when it's gone.`);
+  if (back >= 0) hints.push(`Reply 'returned ${back + 1}' once it's sent back.`);
+  return hints;
+}
+
 /** The reply: the top pick's photo, then one line per pick, then how to report it. */
 export function declutterReplies(picks: LetGoPick[]): Reply[] {
   if (!picks.length) return [NOTHING_TO_CLEAR];
@@ -200,7 +217,7 @@ export function declutterReplies(picks: LetGoPick[]): Reply[] {
     const links = p.exit.links.map((l) => `${l.label}: ${l.url}`).join(" · ");
     return `${i + 1}. ${p.description}: ${p.reasons.join("; ")}. ${p.exit.text}.${links ? ` ${links}` : ""}`;
   });
-  const text = ["Here's what you could let go:", ...lines, SOLD_HINT].join("\n");
+  const text = ["Here's what you could let go:", ...lines, ...answerHints(picks)].join("\n");
   return picks[0]!.photoUrl ? [{ photo: picks[0]!.photoUrl }, text] : [text];
 }
 

@@ -1,7 +1,9 @@
 import { z } from "zod";
 import type { Item } from "./closet/repo.ts";
 import type { Db } from "./db/client.ts";
+import { worthBuyingResult } from "./gaps.ts";
 import { llmJson } from "./llm.ts";
+import type { Groups } from "./match.ts";
 
 // Profile details that make suggestions fit: first name, age range, what
 // their week looks like, and sizes. Asked once in onboarding (all optional),
@@ -223,10 +225,19 @@ const OFFICE: Record<string, Set<string>> = {
 };
 const OFFICE_EXTRA = new Set(["blazer", "dress"]);
 const isOffice = (i: Item) => (OFFICE[i.category]?.has(i.type) ?? false) || OFFICE_EXTRA.has(i.type);
-const ATHLETIC = /\b(run|running|athletic|training|trainers?|gym|sport|tennis|basketball|cross[- ]?train)/i;
+// Athletic shoes by use, or by a sports brand: a pair of Nikes may be lifestyle
+// sneakers, but suggesting gym shoes to someone who might own them is worse.
+const ATHLETIC = /\b(run|running|athletic|training|trainers?|gym|sport|tennis|basketball|cross[- ]?train|nike|adidas|asics|new balance|puma|reebok|under armour|brooks|hoka|saucony|on cloud)/i;
 const isAthleticShoe = (i: Item) => i.category === "shoes" && i.type === "sneakers" && ATHLETIC.test(i.description);
 const DRESSY = new Set(["blazer", "dress", "heels", "loafers", "button-up shirt"]);
 const SLOT_EXAMPLES: Record<string, string> = { top: "a button-up or knit polo", bottom: "chinos or trousers", shoes: "loafers or leather boots" };
+const OFFICE_SEARCH: Record<"top" | "bottom" | "shoes", string> = { top: "button up shirt", bottom: "chinos", shoes: "loafers" };
+
+/** A note, and what to search secondhand for if it suggests buying something. */
+interface Advice {
+  text: string;
+  search?: { category: string; query: string };
+}
 const where = (i: Item) => (i.location ? ` (it's in the ${i.location})` : "");
 
 /**
@@ -235,15 +246,19 @@ const where = (i: Item) => (i.location ? ` (it's in the ${i.location})` : "");
  * something they have. `owned` is the closet; `worn` is what they've worn
  * lately. Empty without occasions.
  */
-export function occasionNotes(occasions: Occasion[] | null | undefined, owned: Item[], worn: Item[]): string[] {
+export function occasionAdvice(occasions: Occasion[] | null | undefined, owned: Item[], worn: Item[]): Advice[] {
   if (!occasions?.length) return [];
-  const notes: string[] = [];
+  const notes: Advice[] = [];
   const wornIds = new Set(worn.map((i) => i.id));
 
   if (occasions.includes("gym")) {
     const shoes = owned.filter(isAthleticShoe);
-    if (!shoes.length) notes.push("You go to the gym, but I don't see athletic shoes in your closet. A pair of training shoes is the one thing to get for that.");
-    else if (!shoes.some((s) => wornIds.has(s.id))) notes.push(`For the gym you already have your ${shoes[0]!.description}${where(shoes[0]!)}.`);
+    if (!shoes.length) {
+      notes.push({
+        text: "You go to the gym, but I don't see athletic shoes in your closet. A pair of training shoes is the one thing to get for that.",
+        search: { category: "shoes", query: "training shoes" },
+      });
+    } else if (!shoes.some((s) => wornIds.has(s.id))) notes.push({ text: `For the gym you already have your ${shoes[0]!.description}${where(shoes[0]!)}.` });
   }
 
   if (occasions.includes("office")) {
@@ -251,23 +266,52 @@ export function occasionNotes(occasions: Occasion[] | null | undefined, owned: I
     if (wornOffice.length < 3) {
       const unworn = owned.filter((i) => isOffice(i) && !wornIds.has(i.id));
       if (unworn.length >= 2) {
-        notes.push(`For the office, you own ${unworn.length} pieces you haven't worn lately: ${unworn.slice(0, 3).map((i) => `${i.description}${where(i)}`).join(", ")}. Try those before buying.`);
+        notes.push({ text: `For the office, you own ${unworn.length} pieces you haven't worn lately: ${unworn.slice(0, 3).map((i) => `${i.description}${where(i)}`).join(", ")}. Try those before buying.` });
       } else {
         // The office slot they're thinnest in, among everything they own.
         const slot = (["top", "bottom", "shoes"] as const)
           .map((s) => ({ s, n: owned.filter((i) => i.category === s && isOffice(i)).length }))
           .sort((a, b) => a.n - b.n)[0]!.s;
-        notes.push(
-          `You said your week has the office, but only ${wornOffice.length} of the ${worn.length} pieces you wear ${wornOffice.length === 1 ? "is" : "are"} office wear. One office ${slot === "shoes" ? "pair of shoes" : slot} (${SLOT_EXAMPLES[slot]}) would cover more of your week.`,
-        );
+        notes.push({
+          text: `You said your week has the office, but only ${wornOffice.length} of the ${worn.length} pieces you wear ${wornOffice.length === 1 ? "is" : "are"} office wear. One office ${slot === "shoes" ? "pair of shoes" : slot} (${SLOT_EXAMPLES[slot]}) would cover more of your week.`,
+          search: { category: slot, query: OFFICE_SEARCH[slot] },
+        });
       }
     }
   }
 
   if (occasions.includes("formal events") && !owned.some((i) => DRESSY.has(i.type))) {
-    notes.push("For formal events, there's nothing dressy in your closet yet: a blazer (or a dress) covers most of them.");
+    notes.push({ text: "For formal events, there's nothing dressy in your closet yet: a blazer (or a dress) covers most of them.", search: { category: "outerwear", query: "blazer" } });
   }
   return notes;
+}
+
+/** Just the sentences (what the tests and older callers read). */
+export function occasionNotes(occasions: Occasion[] | null | undefined, owned: Item[], worn: Item[]): string[] {
+  return occasionAdvice(occasions, owned, worn).map((a) => a.text);
+}
+
+/**
+ * The reply to "what should I buy?": what their week needs first (checked
+ * against everything they own), then the outfit gap from what they wear
+ * (gaps.ts), then the budget line, only when something's being suggested.
+ */
+export function buyAdvice(
+  wears: (Item & { outfit_id: number })[],
+  owned: Item[],
+  groups: Groups,
+  p: Pick<Profile, "occasions" | "ageRange" | "sizeTop" | "sizeBottom" | "sizeShoe">,
+): string {
+  const notes = occasionAdvice(p.occasions, owned, wears);
+  const gap = worthBuyingResult(wears, groups);
+  const buying = notes.some((n) => n.search) || gap.buy;
+  const budget = buying ? budgetLine(p.ageRange) : null;
+  // Secondhand first, in their size: one search per thing it suggests.
+  const searches = [...notes.flatMap((n) => (n.search ? [n.search] : [])), ...(gap.suggestion ? [gap.suggestion] : [])].map((q) => {
+    const query = encodeURIComponent(sizedQuery(q.query, q.category, p));
+    return `Secondhand ${q.query}: https://www.depop.com/search/?q=${query} · eBay: https://www.ebay.com/sch/i.html?_nkw=${query}`;
+  });
+  return [...notes.map((n) => n.text), gap.text, budget, ...searches].filter(Boolean).join("\n");
 }
 
 // ---- storage ----
@@ -302,8 +346,11 @@ export async function saveProfile(db: Db, userId: string, patch: ProfilePatch, o
   if (patch.name !== undefined) set("name", patch.name);
   if (patch.ageRange !== undefined) set("age_range", patch.ageRange);
   if (patch.occasions !== undefined) {
-    if (opts.replaceOccasions || patch.occasions === null) set("occasions", patch.occasions);
-    else set("occasions", patch.occasions, (n) => `ARRAY(SELECT DISTINCT unnest(coalesce(occasions, '{}'::text[]) || $${n}::text[]))`);
+    // Sent as JSON: Bun's Postgres client doesn't encode a JS array as a Postgres array (PGlite does).
+    const list = (n: number) => `ARRAY(SELECT jsonb_array_elements_text($${n}::jsonb))`;
+    if (patch.occasions === null) set("occasions", null);
+    else if (opts.replaceOccasions) set("occasions", JSON.stringify(patch.occasions), list);
+    else set("occasions", JSON.stringify(patch.occasions), (n) => `ARRAY(SELECT DISTINCT unnest(coalesce(occasions, '{}'::text[]) || ${list(n)}))`);
   }
   if (patch.sizeTop !== undefined) set("size_top", patch.sizeTop);
   if (patch.sizeBottom !== undefined) set("size_bottom", patch.sizeBottom);

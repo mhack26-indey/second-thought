@@ -27,7 +27,15 @@ export function worthBuying(wears: (Item & { outfit_id: number })[], groups: Gro
 }
 
 /** The answer, and whether it suggests buying anything (a missing slot) or not. */
-export function worthBuyingResult(wears: (Item & { outfit_id: number })[], groups: Groups): { text: string; buy: boolean } {
+/** What it suggests, for search links: the slot's category and what to search for. */
+export interface BuySuggestion {
+  category: "top" | "bottom" | "shoes";
+  query: string; // "gray shoes", "black top"
+}
+
+const QUERY_NOUN: Record<Slot, string> = { top: "top", bottom: "pants", shoes: "shoes" };
+
+export function worthBuyingResult(wears: (Item & { outfit_id: number })[], groups: Groups): { text: string; buy: boolean; suggestion?: BuySuggestion } {
   const no = (text: string) => ({ text, buy: false });
   const outfits = new Set(wears.map((w) => w.outfit_id)).size;
   if (outfits === 0) {
@@ -68,5 +76,5 @@ export function worthBuyingResult(wears: (Item & { outfit_id: number })[], group
     `You wear ${name(high.slot, high.items.length)} with ${same}.`,
     `${color ? `A ${color} ${one}` : `Another ${one}`} would go with all of them: ${combos} new outfit${combos === 1 ? "" : "s"}.`,
   ].join(" ");
-  return { text, buy: true };
+  return { text, buy: true, suggestion: { category: low.slot, query: `${color ? `${color} ` : ""}${QUERY_NOUN[low.slot]}` } };
 }
