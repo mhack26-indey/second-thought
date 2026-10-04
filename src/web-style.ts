@@ -310,6 +310,10 @@ export const CATEGORY_NAMES: Record<Category, string> = {
 export const BOT_NUMBER = process.env.BOT_NUMBER?.trim() || "+16282679185";
 export const START_LINK = `sms:${BOT_NUMBER}`;
 // Pretty-printed for the page; the sms: link keeps the E.164 form.
+// The Telegram bot, the other way in (override with TELEGRAM_LINK).
+export const TELEGRAM_LINK = process.env.TELEGRAM_LINK?.trim() || "https://t.me/second_th_bot";
+export const TELEGRAM_HANDLE = `@${TELEGRAM_LINK.replace(/^.*t\.me\//, "").replace(/\/.*$/, "")}`;
+
 export const BOT_NUMBER_DISPLAY = /^\+1\d{10}$/.test(BOT_NUMBER)
   ? BOT_NUMBER.replace(/^\+1(\d{3})(\d{3})(\d{4})$/, "($1) $2-$3")
   : BOT_NUMBER;

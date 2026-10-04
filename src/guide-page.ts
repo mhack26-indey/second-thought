@@ -1,5 +1,5 @@
 import { GUIDE, type GuideEntry, LOOP } from "./guide.ts";
-import { BOT_NUMBER_DISPLAY, FONTS, START_LINK, STYLE, esc, publicNav, svg, tabs } from "./web-style.ts";
+import { BOT_NUMBER_DISPLAY, FONTS, START_LINK, STYLE, TELEGRAM_HANDLE, TELEGRAM_LINK, esc, publicNav, svg, tabs } from "./web-style.ts";
 
 // The usage guide as a page: per user at /w/<token>/guide (a tab next to the
 // closet), and public at /guide for people who haven't signed up, with the
@@ -71,7 +71,7 @@ export function guidePage(token?: string): string {
   const toc = GUIDE.map((s) => `<a href="#${anchor(s.title)}">${esc(s.title)}</a>`).join("");
   const signup = token
     ? ""
-    : `<div class="start"><h2>Try it.</h2><p>No app, no account. Text the bot and send your first fit check.</p><a class="pill pill-light" href="${esc(START_LINK)}">Text ${esc(BOT_NUMBER_DISPLAY)} <span class="arrow" aria-hidden="true">→</span></a></div>`;
+    : `<div class="start"><h2>Try it.</h2><p>No app, no account. Text the bot and send your first fit check.</p><a class="pill pill-light" href="${esc(START_LINK)}">Text ${esc(BOT_NUMBER_DISPLAY)} <span class="arrow" aria-hidden="true">→</span></a> <a class="pill pill-light" href="${esc(TELEGRAM_LINK)}">Open ${esc(TELEGRAM_HANDLE)} in Telegram <span class="arrow" aria-hidden="true">→</span></a></div>`;
 
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
