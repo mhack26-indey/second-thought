@@ -1,6 +1,6 @@
 # Roadmap status
 
-Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 2026, after PR #22 (monthly recap card).
+Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 2026, after PR #26 (season check-ins).
 
 **Legend:** ✅ done · 🟡 partly done · ⬜ not started · ✂️ dropped by a plan change
 
@@ -10,7 +10,7 @@ Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 20
 |---|---|
 | P0: core (gate: hour 12) | ✅ 5 of 5 |
 | P1: differentiator | ✅ 3 of 3 |
-| P2: stretch | 🟡 2 of 4 |
+| P2: stretch | 🟡 3 of 4 (Nessie left) |
 | Submission checklist | 🟡 README only; **the repo is still private** |
 
 **P0 is done, so the hour 12 gate is met** (built in code; still to be checked live end to end). P1 is done too, and misread fit checks can now be fixed on the wardrobe page or by text. Next: make the repo public, seed and rehearse the demo, then the rest of the submission checklist; P2 only if time is left.
@@ -37,7 +37,7 @@ Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 20
 
 | Feature | Status | Notes |
 |---|---|---|
-| Season-aware closet ghosts + resale drafts | ⬜ | Needs weather: `outfits.temperature` isn't stored yet. Cities are already real places (Open-Meteo geocoding), so adding the forecast is a small step. The selling side exists: sales are recorded (with price and CO₂) from the page or by text (#18), and wear history is there for "unworn in 60 days". |
+| Season-aware closet ghosts + resale drafts | ✅ | Seasons come from each city's **climate** (10 years of Open-Meteo daily highs, averaged per month, cached), not daily weather: heavy outerwear when the average high is ≤ 50°F, mid layers ≤ 65°F, warm pieces ≥ 72°F, the rest all year. After ~3 weeks of an item's season unworn (while they keep sending fit checks), the bot asks "what happened to this?" with six numbered answers: keep (snooze), occasion-only, in storage (saves the location), doesn't fit (suggests listing it now, with a Depop price check), sold/donated/returned (counted), broke or tossed (removed, with how long it lasted and a quality note if under a year). At most one question a week; "check my closet" for demos (#26). |
 | Nessie transaction detection | ⬜ | Decide at hour 12 per the plan; currently out of reach. |
 | Secondhand search links | ✅ | The shopping check's "no match" reply links a Depop search built from the extracted description. |
 | Monthly recap card | ✅ | A 1080×1350 image: estimated CO₂ saved, fit checks, pieces worn out of the closet, skips or money back, the most-worn piece **per category** with its photo, and pieces that didn't get worn. "my recap" texts it for the last 30 days; the wardrobe page links to `/w/<token>/recap`; the scheduler sends last month's on the 1st, once per user. Drawn server-side with Satori + resvg (#22). |
@@ -63,6 +63,7 @@ These weren't features in the plan, but the flows need them:
 ## Plan changes since the first draft
 
 - ✂️ **Embeddings / pgvector:** similarity is now SQL candidates by category plus a vision-model comparison (`src/closet/compare.ts`). The "enable pgvector" hour 0 task no longer applies.
+- **Seasons from climate, not weather:** closet ghosts use each city's monthly climate normals instead of daily temperature per fit check (#26).
 - **CO₂ estimates:** the impact counter now shows estimated CO₂ savings (Carbonfact category medians, EPA driving comparison), always labeled as estimates. The first version deliberately had none (#17).
 - **Models:** photos go through OpenRouter (`google/gemini-3.8-flash`, Google Vertex priority tier). Texts go to Llama 3.1 8B on OpenRouter, chosen over local qwen2.5:7b, Mistral Small and Qwen3 30B on accuracy and speed (~0.3s per text); see PR #8.
 
@@ -80,7 +81,7 @@ These weren't features in the plan, but the flows need them:
 | Plan | Now |
 |---|---|
 | items: photo, type, color, pattern, season, source, location, status | ✅ All there, plus fit, description, `location_set_at`. Status values are `active` / `returned` / `removed` (plan: owned / returned / sold); sold and donated are recorded in `impact_events` (kinds `avoided`, `recovered`, `sold`, `donated`). |
-| outfits: photo, date, temperature | 🟡 No `temperature` yet (needed for closet ghosts) |
+| outfits: photo, date, temperature | ✂️ No per-outfit temperature: seasons use city climate instead (`city_climate`), which is steadier and needs no daily weather calls |
 | wears | ✅ |
 | purchases | ✅ Written by order intake, linked from `items.purchase_id` |
 | return_policies | ✅ 15 retailers |
@@ -122,13 +123,15 @@ These weren't features in the plan, but the flows need them:
 | "do I have this?" after a photo of one of your texted items | The texted item keeps details copied from the shopping photo | Delay filling in a texted item's details until the 2-minute undo window has passed (`src/ingest.ts`) |
 | Waiting states live in memory | A restart drops an open "do I have this?" window, a new user's held first message, an unanswered "how did it go?" or "delete it?" | Acceptable for the demo; store them in the database if it matters |
 | Deleting a fit check hard-deletes the items only it added | A skip that matched one of those items drops out of the impact counts | Rare; soft-delete instead if it matters |
+| Seasonal check-ins in early October | In Ann Arbor, cold-weather pieces only came into season this month and puffers start in November, so only all-year items can be asked about in the demo | Expected behavior; show it with an all-year item, or explain the season months on stage |
 | Listing detection tested only on rendered pages | Real retailer screenshots (Zara, Uniqlo apps) may look different | Try 3–4 real listing screenshots during the rehearsal |
 
 ## Suggested next steps, in order
 
-1. **Make the repo public when the Devpost is created** (the team's plan), after a quick check that nothing sensitive is committed.
-2. **Seed and rehearse.** Create the Neon branch, run `bun run seed:demo`, merge any duplicates with the fit check editor, and walk the demo script on a real phone: a fit check, a correction, a real order screenshot, a real store listing, "do I have this?" ending on the CO₂ line, and "my impact".
-3. **README pass:** add the fit check editor (merge, search, delete), text corrections, letting items go, CO₂ estimates with their sources, and listing reading; final read for the LLM judge.
-4. **Color names in bad light.** Try the extraction prompt fix and rerun `bun run eval:closet`.
-5. **A fallback provider for photo calls**, so one provider outage doesn't stop photo reading during the demo.
-6. Then the rest of the submission checklist (Devpost, backup video, Figma, screenshots, sponsor requirements, pitch run-throughs). The recap card doubles as a Devpost gallery image. If there's time for more P2, "unworn in 60 days → want to sell it?" is the cheapest piece (wears and selling already exist); Nessie only if entering that track.
+**Feature freeze now.** The plan's freeze is hour 19; with P0, P1 and three of four P2 items built, more features add demo risk without adding much a judge will see in 2 minutes. Remaining time goes to reliability and the submission.
+
+1. **Seed and rehearse on a real phone.** Neon branch, `bun run seed:demo`, merge duplicates with the editor, then the demo script: a fit check, a correction, a real order screenshot, a real store listing, "do I have this?" ending on the CO₂ line, "check my closet", and "my recap" as the closer. Time each reply; RCS replies take 25–40s, iMessage is faster.
+2. **README pass for the LLM judge:** architecture (models for perception, code for state and numbers), the evals (router 60/61, closet 50/50 found, 6/6 shopping matches, model comparison), the failures found and fixed, CO₂ sources, and a "why not just ask ChatGPT?" section.
+3. **Demo safety:** a fallback provider for photo calls; record the backup video.
+4. **Make the repo public when the Devpost is created.**
+5. The rest of the submission checklist (Devpost, Figma, screenshots incl. the recap card, sponsor requirements, two pitch run-throughs). Nessie only if entering that track.
