@@ -1,6 +1,6 @@
 # Roadmap status
 
-Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 2026, after PR #29 ("stop" and "delete my data").
+Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 4, 2026, after the usage guide.
 
 **Legend:** ✅ done · 🟡 partly done · ⬜ not started · ✂️ dropped by a plan change
 
@@ -65,6 +65,9 @@ These weren't features in the plan, but the flows need them:
 - Wardrobe page (`/w/<token>`): items with locations, fit check photos, reminders, an editable profile. This is the plan's "one closet page".
 - Landing page with a QR code that texts the bot
 - Typing bubble while the bot works
+- Usage guide: onboarding ends with the three-photo loop in one short message plus the guide and wardrobe links, and "help" ends with the guide link. The guide page (`/w/<token>/guide`, a tab beside the closet; public at `/guide`, linked from the landing page) shows the loop as feature cards and every command by section, each with a Copy button and an example reply. Its entries are keyed by router intent (`ACTION_NAMES` in `src/llm.ts`), and a test fails if an intent has none (`src/guide.ts`, `src/guide-page.ts`)
+- Design system restyle: the wardrobe page, landing page and recap card follow `docs/design-system.md` (mint palette, Merriweather/Inter, item cards, feature-card stats, dot-matrix hero with a shine pill and QR panel, gradient recap card)
+- Closet dump onboarding: a photo of a closet rail, a pile on the bed or an open drawer (`image_kind: "closet_dump"`, read in the same extraction call) adds every item through the usual dedup with `source = 'closet'`, logging no outfit or wears and not counting as the day's fit check. "add my closet" / "closet dump" opens 10 minutes in which every photo counts as one; "done" (or time running out) sends "Your closet has n items…". Onboarding offers it right after the city step (`src/closet-mode.ts`)
 - Wardrobe page shows which photos each item came from: thumbnails per item with a wear count, items listed under each fit check, linked both ways; tapping an item opens its photos large with a view transition (#11, #12)
 - Fit check editor on the wardrobe page (`/w/<token>/fit/<id>`): "Same as this" merges an item the model split in two (suggestions ranked by type, LLM color groups, pattern and words), "Not in this photo" unlinks (and removes an item only that photo produced), and a search box suggests closet items as you describe one ("grey sweats", "pu…") or adds it as new (#13, #14)
 - Corrections by text for the latest fit check: same as / relabel / missed / not there (#15)

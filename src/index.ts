@@ -23,7 +23,7 @@ import {
 import { claimNudges, releaseNudge } from "./returns.ts";
 import { previousMonth } from "./recap.ts";
 import { recapFor } from "./recaps.ts";
-import { askCheckin } from "./flows.ts";
+import { askCheckin, endClosetModes } from "./flows.ts";
 import { startWebServer } from "./web.ts";
 
 // Spectrum bridges a single agent loop to many messaging interfaces.
@@ -163,6 +163,14 @@ async function sendReturnNudges() {
 
 // One tick at a time: a slow database or send shouldn't stack up overlapping runs.
 let ticking = false;
+// Closet mode windows that ran out of time get their summary ("Your closet
+// has 23 items..."). The user just sent photos, so a follow-up is expected.
+async function sendClosetSummaries() {
+  for (const { userId, text } of await endClosetModes()) {
+    await sendTo(userId, text).catch((err) => console.error(`closet summary for ${userId} failed`, err));
+  }
+}
+
 async function tick() {
   if (ticking) return;
   ticking = true;
@@ -171,6 +179,7 @@ async function tick() {
     await sendReturnNudges();
     await sendMonthlyRecaps();
     await sendCheckins();
+    await sendClosetSummaries();
   } catch (err) {
     console.error("scheduler tick failed", err);
   } finally {

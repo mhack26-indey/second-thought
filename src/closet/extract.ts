@@ -19,9 +19,11 @@ export const ModelItemSchema = z.object({
 // What kind of photo it is, read in the same call so routing costs nothing:
 // a fit check (worn clothes), an order screenshot (a retailer's order or
 // receipt page), or a product shot (a store photo or listing, even with a
-// model wearing it). A listing's title says which garment is for sale, so only
-// that one is read, not the rest of the model's outfit.
-export const IMAGE_KINDS = ["fit_check", "order_screenshot", "product"] as const;
+// model wearing it), or a closet dump (clothes nobody is wearing, shown to
+// add them to the closet: a rail, a pile, a drawer). A listing's title says
+// which garment is for sale, so only that one is read, not the rest of the
+// model's outfit.
+export const IMAGE_KINDS = ["fit_check", "order_screenshot", "product", "closet_dump"] as const;
 export type ImageKind = (typeof IMAGE_KINDS)[number];
 
 export const ExtractionSchema = z.object({
@@ -39,7 +41,8 @@ const typeList = Object.entries(CATEGORY_TYPES)
 
 const EXTRACT_PROMPT = `First, image_kind:
 - order_screenshot: a screenshot of an online order, order confirmation, receipt or shipping email (a retailer's page or app listing items bought, usually with prices)
-- product: a store listing or product page (shop layout: a product name, a price, sizes, "add to bag/cart"), even when a model is wearing the item; or a product photo, or clothes on a hanger, shelf or rack with nobody wearing them
+- product: a store listing or product page (shop layout: a product name, a price, sizes, "add to bag/cart"), even when a model is wearing the item; or a photo of one item on its own (on a hanger, held up, laid flat, on a store shelf) with nobody wearing it
+- closet_dump: several clothes nobody is wearing, at home, shown to record what someone owns: a closet rail, a pile on a bed, an open drawer, folded stacks, shoes lined up
 - fit_check: anything else, usually a person showing what they're wearing
 
 listing_title: for a product listing, its product name or description exactly as shown (e.g. "Relaxed Straight-Leg Jean"); otherwise null.
@@ -50,6 +53,8 @@ If it's a product listing, list ONLY what's for sale:
 - With a product name or description, list just the garment(s) it names, and none of the other clothes the model is styled in. Describe it in the listing's own words where they say something useful (color, cut, fabric).
 - If the listing sells a whole outfit (a "set", "matching set", "two-piece", "co-ord", bundle, or several pieces each with its own price), list every piece of it.
 - With no text, list only the featured item (the one centered or most prominent).
+
+If it's a closet_dump, list every item you can identify, including ones partly hidden behind others as long as you can tell what they are (a sleeve and collar are enough for a shirt). Each hanger, stack or pair is its own item.
 
 Otherwise (a fit check or a plain product photo), list every clothing item, pair of shoes, accessory and piece of jewelry visibly worn or shown in this photo.
 
@@ -66,7 +71,7 @@ ${typeList}
 Rules:
 - One entry per physical item. Don't list the same item twice; a pair of shoes or earrings is one item.
 - Skip socks, tights and underwear.
-- Skip items you can't make out well enough to describe (heavily cropped or hidden).
+- Skip items you can't make out well enough to describe (heavily cropped or hidden; in a closet_dump, see above).
 - If there are no clothing items, return an empty list.
 - Use lowercase for every field.`;
 

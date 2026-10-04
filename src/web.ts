@@ -1,5 +1,7 @@
 import QRCode from "qrcode";
 import { CATEGORIES, type Category } from "./closet/categories.ts";
+import { publicGuideResponse, userGuideResponse } from "./guide-page.ts";
+import { BOT_NUMBER_DISPLAY, CATEGORY_NAMES, FONTS, PIN, SEASONS, START_LINK, STAT_ICONS, STYLE, TOKENS, esc, icon, svg, tabs } from "./web-style.ts";
 import { cityFrom, findCities } from "./cities.ts";
 import { PORT, PUBLIC_URL } from "./config.ts";
 import { addItemToOutfit, deleteFitCheck, itemsOnlyIn, linkItem, mergeItems, unlinkItem } from "./fit-edits.ts";
@@ -38,12 +40,14 @@ export function wardrobeUrl(user: User): string {
   return `${PUBLIC_URL}/w/${user.webToken}`;
 }
 
+export function guideUrl(user: User): string {
+  return `${PUBLIC_URL}/w/${user.webToken}/guide`;
+}
+
 export function recapUrl(user: User): string {
   return `${PUBLIC_URL}/w/${user.webToken}/recap`;
 }
 
-const esc = (s: string) =>
-  s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
 const hourLabel = (hour: number) => `${hour % 12 || 12}${hour < 12 ? "am" : "pm"}`;
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -62,116 +66,6 @@ const SECTION_TITLES: Record<Category, string> = {
   accessory: "accessories",
   jewelry: "jewelry",
 };
-
-const STYLE = `  :root { color-scheme: light dark; --muted: #888; --line: #8883; }
-  body { font: 16px/1.4 -apple-system, system-ui, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px 16px 48px; }
-  h1 { font-size: 28px; margin: 0 0 4px; }
-  .sub { color: var(--muted); margin: 0 0 24px; }
-  .impact { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 28px 0 8px; }
-  h2 span { font-weight: normal; }
-  ul { list-style: none; padding: 0; margin: 0; }
-  li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
-  li small { color: var(--muted); }
-  time { color: var(--muted); white-space: nowrap; font-size: 14px; }
-  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px 10px; }
-  figure { margin: 0; min-width: 0; scroll-margin-top: 16px; }
-  img { width: 100%; aspect-ratio: 3/4; object-fit: cover; border-radius: 8px; background: var(--line); }
-  figcaption { font-size: 12px; color: var(--muted); text-align: center; margin: 4px 0 2px; }
-  .found li { display: block; padding: 3px 0; border: 0; font-size: 13px; line-height: 1.3; }
-  .found a, .thumbs a { color: inherit; }
-  .thumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
-  li.has-photos { cursor: pointer; }
-  li.has-photos:hover > div > span { text-decoration: underline; text-underline-offset: 3px; }
-  dialog.viewer { width: 100%; max-width: 560px; height: 100%; max-height: 100%; margin: 0 auto; padding: 0; border: 0; background: Canvas; color: CanvasText; }
-  dialog.viewer::backdrop { background: #000a; }
-  .viewer header { position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; background: Canvas; border-bottom: 1px solid var(--line); z-index: 1; }
-  .viewer header h3 { margin: 0; font-size: 17px; }
-  .viewer header button { font-size: 20px; line-height: 1; padding: 6px 10px; background: transparent; color: inherit; border: 1px solid var(--line); }
-  .viewer .shots { display: grid; gap: 20px; padding: 16px; }
-  .viewer figure img { aspect-ratio: auto; max-height: 75vh; object-fit: contain; background: transparent; }
-  .viewer figcaption a { color: inherit; }
-  ::view-transition-group(*) { animation-duration: .35s; animation-timing-function: cubic-bezier(.2, .8, .2, 1); }
-  @media (prefers-reduced-motion: reduce) { ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; } }
-  .thumbs img { width: 32px; height: 42px; aspect-ratio: auto; border-radius: 4px; display: block; }
-  .thumbs small { color: var(--muted); font-size: 12px; margin-left: 4px; }
-  li[id] { scroll-margin-top: 16px; }
-  :target { animation: flash 2s ease-out; }
-  @keyframes flash { from { background: #f5c54266; } to { background: transparent; } }
-  .empty { color: var(--muted); }
-  form { display: grid; gap: 12px; }
-  label { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
-  input, select, button { font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; }
-  button { background: CanvasText; color: Canvas; border: 0; font-weight: 600; cursor: pointer; }
-  .saved { color: #2a9d5c; font-size: 14px; margin: 0; }
-  .error { color: #d1495b; font-size: 14px; margin: 0; }
-  .skipped summary { cursor: pointer; color: var(--muted); font-size: 14px; }
-  .right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
-  .count { color: var(--accent, #2f6b4f); font-weight: 700; }
-  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 8px 0 28px; }
-  .tile { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
-    border: 1px solid var(--line); border-radius: 20px; background: color-mix(in srgb, CanvasText 4%, Canvas); color: inherit;
-    font: inherit; font-weight: 600; cursor: pointer; padding: 8px; }
-  .tile:hover { background: color-mix(in srgb, CanvasText 9%, Canvas); }
-  .tile small { color: var(--muted); font-weight: normal; }
-  .closet-head { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin: 8px 0 4px; }
-  .closet-head h2 { font-size: 22px; text-transform: none; letter-spacing: 0; color: inherit; margin: 0; }
-  .back { background: transparent; color: var(--muted); border: 0; padding: 0; font-weight: normal; font-size: 14px; cursor: pointer; }
-  /* With JavaScript: tiles first, one category at a time. Without it, every list shows. */
-  .js .closet { display: none; }
-  .js.open .tiles { display: none; }
-  .js.open .closet { display: block; }
-  .js .catlist { display: none; }
-  .js .catlist.shown { display: block; }
-  .js .closet.one .catlist h2 { display: none; }
-  @media (min-width: 520px) { .tiles { grid-template-columns: repeat(4, 1fr); } }
-  .letgo summary { cursor: pointer; color: var(--muted); font-size: 12px; list-style: none; }
-  .letgo summary::-webkit-details-marker { display: none; }
-  .letgo form { display: grid; gap: 6px; margin-top: 6px; min-width: 170px; }
-  .letgo form div { display: flex; gap: 6px; }
-  .letgo input { width: 80px; padding: 6px 8px; font-size: 14px; }
-  .letgo button { padding: 6px 10px; font-size: 14px; }
-  .letgo button.quiet { background: transparent; color: inherit; border: 1px solid var(--line); font-weight: normal; }
-  .skipped li small { display: block; }
-  .skipped .note { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
-  .skipped .note a { color: inherit; }
-  .edit { font-size: 12px; color: var(--muted); }
-  .fit img.photo { aspect-ratio: auto; max-height: 70vh; object-fit: contain; background: transparent; }
-  .fit li { align-items: center; flex-wrap: wrap; }
-  .fit form { display: flex; gap: 6px; align-items: center; margin: 0; }
-  .fit li > form select { max-width: 190px; padding: 6px 8px; font-size: 14px; }
-  .fit li > div { display: flex; gap: 6px; flex-wrap: wrap; }
-  .fit button.quiet { background: transparent; color: inherit; border: 1px solid var(--line); font-weight: normal; padding: 6px 10px; font-size: 14px; }
-  .fit .add { display: grid; gap: 8px; }
-  .fit .add div { display: flex; gap: 6px; flex-wrap: wrap; }
-  .fit .add > input { width: 100%; box-sizing: border-box; }
-  .suggest { margin: 0; }
-  .suggest li { padding: 0; border: 0; }
-  .suggest button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; background: transparent; color: inherit; border: 0; border-radius: 8px; font-weight: normal; text-align: left; }
-  .suggest button:hover, .suggest button[aria-selected="true"] { background: var(--line); }
-  .suggest img { width: 36px; height: 48px; aspect-ratio: auto; object-fit: cover; border-radius: 4px; flex: none; }
-  .suggest span { flex: 1; }
-  .suggest small { color: var(--muted); }
-  .fit details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
-  .fit details div { display: flex; gap: 6px; margin-top: 8px; }
-  button.danger { background: #d1495b; color: #fff; }
-  .notice { padding: 10px 12px; border-radius: 8px; background: #2a9d5c22; margin: 0 0 16px; }
-  .back { color: inherit; display: inline-block; margin-bottom: 12px; }
-`;
-
-// Category icons: simple line drawings (24×24, drawn in the text color).
-const ICONS: Record<Category | "all", string> = {
-  top: '<path d="M8 3 4 6l2 4 2-1v12h8V9l2 1 2-4-4-3c-.5 1.5-2 2.5-4 2.5S8.5 4.5 8 3Z"/>',
-  bottom: '<path d="M7 3h10l1 18h-4.5L12 10l-1.5 11H6L7 3Z"/><path d="M7 6h10"/>',
-  dress: '<path d="M9 3h6l-1 5 4 13H6l4-13-1-5Z"/><path d="M10 8h4"/>',
-  outerwear: '<path d="M8 3 3 6v15h5v-9M16 3l5 3v15h-5v-9"/><path d="M8 3c1 2 2.5 3 4 3s3-1 4-3M8 21h8V9M12 6v15"/>',
-  shoes: '<path d="M3 17v-5l5-1 3-4c1 1 1.5 3 1.5 3l7.5 3c1 .5 1.5 1.5 1.5 2.5V17Z"/><path d="M3 17v2h18v-2"/>',
-  accessory: '<path d="M5 9h14l-1 12H6L5 9Z"/><path d="M9 9V7a3 3 0 0 1 6 0v2"/>',
-  jewelry: '<circle cx="12" cy="14" r="6"/><path d="m10 5 2-2 2 2-2 3-2-3Z"/>',
-  all: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
-};
-const icon = (cat: Category | "all") =>
-  `<svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">${ICONS[cat]}</svg>`;
 
 interface PageData {
   user: User;
@@ -228,24 +122,42 @@ function page({ user, items: allItems, outfits, reminders: pending, impact, hist
     </form></details>`;
 
   const pieces = (items: Item[]) => items.reduce((n, i) => n + (i.quantity ?? 1), 0);
+
+  // A closet item as a card: its latest photo, name, color and season, tags, wears.
+  const itemCard = (i: Item, n: number) => {
+    const fits = fitsOf.get(i.id) ?? [];
+    const cover = [...fits].filter((o) => o.photoUrl).sort((a, b) => b.at - a.at)[0]?.photoUrl ?? i.photo_url;
+    const lastWorn = fits.length ? Math.max(...fits.map((o) => o.at)) : null;
+    const sub = [i.color_primary !== "unknown" ? i.color_primary : null, SEASONS[i.season], `added ${fmtDate(i.created_at.getTime())}`]
+      .filter(Boolean)
+      .join(" · ");
+    const tags = [
+      `<span class="tag">${icon(i.category, 12)}${CATEGORY_NAMES[i.category]}</span>`,
+      i.location ? `<span class="tag loc">${svg(PIN, 12)}${esc(i.location)}</span>` : "",
+    ].join("");
+    const wornLine = fits.length ? `${plural(fits.length, "wear")} · last worn ${fmtDate(lastWorn!)}` : "Not in a fit check yet";
+    return `<li id="item-${i.id}" class="card${fits.length ? " has-photos" : ""}"${fits.length ? ` data-item="${i.id}"` : ""} style="--i:${Math.min(n, 10)}">
+      <div class="pic">${cover ? `<img src="${esc(cover)}" loading="lazy" alt="">` : icon(i.category, 40)}</div>
+      <div class="card-body"><span class="card-title">${esc(i.description)}${i.quantity > 1 ? ` <b class="count">×${i.quantity}</b>` : ""}</span>
+        <p class="card-sub">${esc(sub)}</p><div class="tags">${tags}</div>${thumbs(i)}
+        <div class="card-foot"><span>${wornLine}</span><div class="actions">${quantityForm(i)}${letGoForm(i)}</div></div></div></li>`;
+  };
   const present = CATEGORIES.filter((cat) => allItems.some((i) => i.category === cat));
   // Big square tiles, one per category and "All items" last. Each opens its list.
   const tiles = [...present, "all" as const]
-    .map((cat) => {
+    .map((cat, i) => {
       const count = cat === "all" ? pieces(allItems) : pieces(allItems.filter((i) => i.category === cat));
       const label = cat === "all" ? "All items" : SECTION_TITLES[cat].replace(/^./, (c) => c.toUpperCase());
-      return `<button type="button" class="tile" data-cat="${cat}">${icon(cat)}<span>${label}</span><small>${count}</small></button>`;
+      return `<button type="button" class="tile" data-cat="${cat}" style="--i:${i}"><i class="ico">${icon(cat)}</i><span>${label}</span><small>${count}</small></button>`;
     })
     .join("");
 
   const sections = CATEGORIES.map((cat) => {
     const items = allItems.filter((i) => i.category === cat);
     if (!items.length) return "";
-    return `<section class="catlist" data-cat="${cat}"><h2>${SECTION_TITLES[cat]} <span>${pieces(items)}</span></h2><ul>${items
-      .map(
-        (i) =>
-          `<li id="item-${i.id}"${fitsOf.has(i.id) ? ` class="has-photos" data-item="${i.id}"` : ""}><div><span>${esc(i.description)}${i.quantity > 1 ? ` <b class="count">×${i.quantity}</b>` : ""}${i.location ? ` <small>· ${esc(i.location)}</small>` : ""}</span>${thumbs(i)}</div><div class="right"><time>${fmtDate(i.created_at.getTime())}</time>${quantityForm(i)}${letGoForm(i)}</div></li>`,
-      )
+    const title = SECTION_TITLES[cat].replace(/^./, (c) => c.toUpperCase());
+    return `<section class="catlist" data-cat="${cat}"><h2>${title} <span>${pieces(items)}</span></h2><ul class="cards">${items
+      .map((i, n) => itemCard(i, n))
       .join("")}</ul></section>`;
   }).join("");
 
@@ -260,6 +172,12 @@ function page({ user, items: allItems, outfits, reminders: pending, impact, hist
     })
     .join("");
 
+  // Distinct items in fit checks from the last 7 days.
+  const weekAgo = Date.now() - 7 * 86_400_000;
+  const wornThisWeek = new Set(wears.filter((w) => (outfitById.get(w.outfitId)?.at ?? 0) >= weekAgo).map((w) => w.itemId)).size;
+  const stat = (paths: string, value: string, label: string, i: number) =>
+    `<div class="stat" style="--i:${i}"><i class="ico">${svg(paths, 28)}</i><div><b>${esc(value)}</b><small>${label}</small></div></div>`;
+
   const hour = user.fitCheckHour;
   const fitCheck = hour === null ? "off" : hourLabel(hour);
   const hourOptions = [
@@ -273,15 +191,23 @@ function page({ user, items: allItems, outfits, reminders: pending, impact, hist
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${user.name ? `${esc(user.name)}'s` : "Your"} wardrobe · Second Thought</title>
+${FONTS}
 <style>
 ${STYLE}</style></head><body>
+${tabs(user.webToken, "closet")}
 <h1>${user.name ? `${esc(user.name)}'s` : "Your"} wardrobe</h1>
-<p class="impact">${impactSummary(impact)}</p>
-<p><a class="edit" href="/w/${user.webToken}/recap">See your 30-day recap →</a></p>
+<div class="stats" aria-label="${esc(impactSummary(impact))}">
+  ${stat(STAT_ICONS.skipped, String(impact.skipped), impact.skipped === 1 ? "purchase skipped" : "purchases skipped", 0)}
+  ${stat(STAT_ICONS.money, money(impact.recovered), "back from returns and sales", 1)}
+  ${stat(STAT_ICONS.worn, String(wornThisWeek), wornThisWeek === 1 ? "item worn this week" : "items worn this week", 2)}
+  ${stat(STAT_ICONS.co2, impact.co2Kg > 0 ? `≈ ${Math.round(impact.co2Kg)} kg` : "0 kg", "CO₂e saved, est.", 3)}
+</div>
+${impact.returned + impact.sold + impact.donated ? `<p class="sub">${esc(impactSummary(impact))}</p>` : ""}
+<p class="links"><a class="edit" href="/w/${user.webToken}/recap">See your 30-day recap →</a></p>
 ${notice ? `<p class="notice">${esc(notice)}</p>` : ""}
 ${
   history.length
-    ? `<details class="skipped"><summary>Here's what you saved</summary><ul>${history
+    ? `<details class="skipped"><summary>Here's what you saved</summary><ul class="rows">${history
         .map((k) => {
           const what =
             k.kind === "avoided"
@@ -305,7 +231,7 @@ ${
 <h2 id="fits">Fit checks</h2>
 ${photos ? `<div class="grid">${photos}</div>` : `<p class="empty">No fit checks yet. Send a photo of today's outfit.</p>`}
 <h2>Reminders</h2>
-<ul><li>Daily fit check<time>${fitCheck}</time></li>${reminders}</ul>
+<ul class="rows"><li>Daily fit check<time>${fitCheck}</time></li>${reminders}</ul>
 <h2 id="profile">Profile</h2>
 <form method="post" action="/w/${user.webToken}/profile">
   ${saved ? `<p class="saved">Saved.</p>` : ""}
@@ -504,6 +430,7 @@ function fitPage({ user, outfit, linked, sameAs, closet, notice, onlyHere }: Fit
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fit check ${fmtDate(outfit.at)} · Second Thought</title>
+${FONTS}
 <style>
 ${STYLE}</style></head><body class="fit">
 <a class="back" href="${base}#fit-${outfit.id}">← Wardrobe</a>
@@ -511,7 +438,7 @@ ${STYLE}</style></head><body class="fit">
 ${notice ? `<p class="notice">${esc(notice)}</p>` : ""}
 ${outfit.photoUrl ? `<img class="photo" src="${esc(outfit.photoUrl)}" alt="Fit check ${fmtDate(outfit.at)}">` : ""}
 <h2>In this photo <span>${linked.length}</span></h2>
-${rows ? `<ul>${rows}</ul>` : `<p class="empty">No items linked to this photo.</p>`}
+${rows ? `<ul class="rows">${rows}</ul>` : `<p class="empty">No items linked to this photo.</p>`}
 <h2>Add something that's missing</h2>
 <form class="add" method="post" action="${action}" id="add">
   <input type="hidden" name="op" value="add">
@@ -587,15 +514,6 @@ ${rows ? `<ul>${rows}</ul>` : `<p class="empty">No items linked to this photo.</
 
 const html = (body: string) => new Response(body, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 
-// The number people text to start. Defaults to our Spectrum line; override
-// with BOT_NUMBER if the line changes (`photon spectrum lines list`).
-const BOT_NUMBER = process.env.BOT_NUMBER?.trim() || "+16282679185";
-const START_LINK = `sms:${BOT_NUMBER}`;
-// Pretty-printed for the page; the sms: link keeps the E.164 form.
-const BOT_NUMBER_DISPLAY = /^\+1\d{10}$/.test(BOT_NUMBER)
-  ? BOT_NUMBER.replace(/^\+1(\d{3})(\d{3})(\d{4})$/, "($1) $2-$3")
-  : BOT_NUMBER;
-
 // One QR code, encoded once at startup. Transparent background so only the
 // dark modules are drawn; the card behind them supplies the white and the
 // quiet zone is baked in so phone cameras lock on.
@@ -607,41 +525,77 @@ const qrSvg = QRCode.toString(START_LINK, {
 });
 
 async function landingPage(): Promise<string> {
-  const start = `<a class="card" href="${esc(START_LINK)}">${await qrSvg}</a>
-<p class="hint"><span class="desktop">Scan with your phone camera, or text </span><span class="phone">Tap the code above, or text </span><a href="${esc(START_LINK)}">${esc(BOT_NUMBER_DISPLAY)}</a></p>`;
-
+  const feature = (paths: string, title: string, body: string, i: number) =>
+    `<li class="feature" style="--i:${i}"><i class="ico">${svg(paths, 30)}</i><div><h3>${title}</h3><p>${body}</p></div></li>`;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Second Thought · the closet that texts back</title>
 <meta name="description" content="An iMessage bot that remembers everything in your closet, so you stop buying clothes you already own.">
+${FONTS}
 <style>
-  :root { color-scheme: light dark; --muted: #888; --line: #8883; }
-  body { font: 16px/1.5 -apple-system, system-ui, sans-serif; max-width: 420px; margin: 0 auto;
-         padding: 12vh 20px 48px; text-align: center; }
-  h1 { font-size: 34px; line-height: 1.1; margin: 0 0 12px; letter-spacing: -0.02em; }
-  .lede { font-size: 18px; margin: 0 0 8px; }
-  .sub { color: var(--muted); margin: 0 0 36px; }
-  .card { display: block; width: 220px; margin: 0 auto 16px; padding: 12px; border-radius: 16px;
-          background: #fff; box-shadow: 0 1px 3px #0002; }
-  .card svg { display: block; width: 100%; height: auto; }
-  .hint { color: var(--muted); font-size: 14px; margin: 0 0 40px; }
+${TOKENS}
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 400 16px/1.5 var(--sans); color: var(--text); background: var(--bg); }
+  h1, h2, h3 { font-family: var(--serif); font-weight: 700; margin: 0; }
   a { color: inherit; }
-  .hint a { font-weight: 600; white-space: nowrap; }
-  ul { list-style: none; padding: 0; margin: 0; text-align: left; display: grid; gap: 10px; }
-  li { padding: 10px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 15px; }
-  li b { color: CanvasText; font-weight: 600; }
+  /* Black hero with the dot matrix, faded toward the edges. */
+  .hero { position: relative; overflow: hidden; background: var(--ink); color: var(--bg); padding: 56px 20px 64px; }
+  .hero::before { content: ""; position: absolute; inset: 0; pointer-events: none;
+    background-image: radial-gradient(rgba(161, 204, 128, .55) 1px, transparent 1px); background-size: 10px 10px;
+    -webkit-mask-image: radial-gradient(ellipse at 50% 40%, #000 30%, transparent 75%); mask-image: radial-gradient(ellipse at 50% 40%, #000 30%, transparent 75%); }
+  .split { position: relative; max-width: 960px; margin: 0 auto; display: grid; gap: 30px; align-items: center; }
+  .brand { font-family: var(--serif); font-weight: 700; font-size: 1rem; letter-spacing: .02em; color: var(--bg); margin: 0 0 15px; }
+  .hero h1 { font-size: var(--text-3xl); line-height: 1.12; color: var(--primary); animation: fade .4s ease both; }
+  .lede { font-size: 1.125rem; margin: 15px 0 30px; color: var(--bg); opacity: .9; max-width: 32ch; animation: fade .4s ease .08s both; }
+  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 14px 30px; border-radius: var(--r-pill); background: var(--primary); color: var(--neutral);
+    font-weight: 700; font-family: var(--sans); text-decoration: none; box-shadow: var(--shadow-sm); transition: transform var(--ease), background var(--ease); animation: fade .4s ease .16s both; }
+  .pill:hover { transform: scale(1.05); }
+  .pill:active { transform: scale(.95); }
+  /* The QR panel: white, rounded, like a rewards card. */
+  .qr { background: #fff; color: var(--text); border-radius: var(--r-panel); padding: 20px; box-shadow: var(--shadow-lg); text-align: center; max-width: 320px; width: 100%; justify-self: center; animation: fade .4s ease .24s both; }
+  .qr a.code { display: block; width: 100%; max-width: 230px; margin: 0 auto 10px; }
+  .qr svg { display: block; width: 100%; height: auto; }
+  .qr h2 { font-size: 1.125rem; color: var(--neutral); margin: 0 0 10px; }
+  .hint { color: var(--muted); font-size: .875rem; margin: 0; }
+  .hint a { color: var(--primary-darkest); font-weight: 700; white-space: nowrap; }
   .phone { display: none; }
   @media (hover: none) and (pointer: coarse) { .desktop { display: none; } .phone { display: inline; } }
+  /* What it does: feature cards. */
+  .features { max-width: 960px; margin: 0 auto; padding: 30px 20px 56px; display: grid; gap: 15px; list-style: none; }
+  .feature { display: flex; gap: 15px; align-items: flex-start; padding: 20px; border-radius: var(--r-panel); background: var(--bg-dim); animation: fade .4s ease both; animation-delay: calc(.3s + var(--i) * 80ms); }
+  .feature .ico { flex: none; width: 56px; height: 56px; display: grid; place-items: center; border-radius: var(--r-panel); background: var(--primary-darker); color: var(--bg); }
+  .feature h3 { font-size: 1.0625rem; color: var(--neutral); margin: 2px 0 5px; }
+  .feature p { margin: 0; color: var(--text); }
+  .more { max-width: 960px; margin: -30px auto 0; padding: 0 20px 56px; }
+  .more a { color: var(--primary-darkest); font-weight: 700; }
+  @media (min-width: 760px) {
+    .hero { padding: 96px 32px; }
+    .split { grid-template-columns: 1.3fr 1fr; gap: 56px; }
+    .hero h1 { font-size: var(--text-4xl); }
+    .features { grid-template-columns: repeat(3, 1fr); }
+    .feature { flex-direction: column; }
+    .feature .ico { width: 64px; height: 64px; }
+  }
 </style></head><body>
-<h1>Second Thought</h1>
-<p class="lede">The closet that texts back.</p>
-<p class="sub">Send fit checks and order screenshots. It remembers everything you own, so you stop buying clothes you already have.</p>
-${start}
-<ul>
-  <li><b>Do I already have this?</b> Send a photo of something you&rsquo;re about to buy and get back the near-duplicates already hanging in your closet.</li>
-  <li><b>Return before the window closes.</b> Order screenshots log the deadline, and you get a nudge if you still haven&rsquo;t worn it.</li>
-  <li><b>No app to install.</b> It all happens in Messages.</li>
+<section class="hero"><div class="split">
+  <div>
+    <p class="brand">Second Thought</p>
+    <h1>Stop buying what you already own.</h1>
+    <p class="lede">The closet that texts back. Send fit checks and order screenshots; it remembers everything you own.</p>
+    <a class="pill shine" href="${esc(START_LINK)}">Text the bot <span aria-hidden="true">→</span></a>
+  </div>
+  <div class="qr">
+    <h2>Scan to start</h2>
+    <a class="code" href="${esc(START_LINK)}" aria-label="Text the bot">${await qrSvg}</a>
+    <p class="hint"><span class="desktop">Scan with your phone camera, or text </span><span class="phone">Tap the code, or text </span><a href="${esc(START_LINK)}">${esc(BOT_NUMBER_DISPLAY)}</a></p>
+  </div>
+</div></section>
+<ul class="features">
+  ${feature(STAT_ICONS.skipped, "Do I already have this?", "Send a photo of something you&rsquo;re about to buy and get back the near-duplicates already hanging in your closet.", 0)}
+  ${feature(STAT_ICONS.money, "Return before the window closes.", "Order screenshots log the deadline, and you get a nudge if you still haven&rsquo;t worn it.", 1)}
+  ${feature('<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M11 18h2"/>', "No app to install.", "It all happens in Messages.", 2)}
 </ul>
+<p class="more"><a href="/guide">See everything you can text it &rarr;</a></p>
 </body></html>`;
 }
 
@@ -651,6 +605,8 @@ export function startWebServer() {
     routes: {
       "/": async () =>
         new Response(await landingPage(), { headers: { "Content-Type": "text/html; charset=utf-8" } }),
+      "/guide": () => publicGuideResponse(),
+      "/w/:token/guide": (req) => userGuideResponse(req.params.token, getUserByToken),
       "/w/:token": async (req) => {
         const user = await getUserByToken(req.params.token);
         if (!user) return new Response("Not found", { status: 404 });
@@ -714,11 +670,9 @@ export function startWebServer() {
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Recap · Second Thought</title>
 <meta property="og:title" content="My last 30 days on Second Thought"><meta property="og:image" content="${recapUrl(user)}.png">
+${FONTS}
 <style>
-${STYLE}
-  .recap img { aspect-ratio: auto; border-radius: 16px; box-shadow: 0 8px 30px #0002; }
-  .recap pre { white-space: pre-wrap; font: inherit; color: var(--muted); }
-</style></head><body class="recap">
+${STYLE}</style></head><body class="recap">
 <a class="back" href="/w/${user.webToken}">← Wardrobe</a>
 <h1>Your last 30 days</h1>
 <img src="/w/${user.webToken}/recap.png" alt="${esc(summary)}">
