@@ -449,8 +449,8 @@ async function linkAccounts(user: User, t: string): Promise<string | undefined> 
     const code = linkCodes.get(entered[1]!);
     if (!code || code.expires < Date.now()) return "That code isn't valid (they last 10 minutes). Text \"link\" on your other account for a new one.";
     if (code.userId === user.id) return "That's this account's own code. Enter it on your other account.";
+    const moved = await mergeUsers(code.userId, user.id); // throws (and keeps the code) if it fails
     linkCodes.delete(entered[1]!);
-    const moved = await mergeUsers(code.userId, user.id);
     const here = PLATFORM_NAME[user.platform] ?? user.platform;
     return `Linked! Your closet (${moved.items} piece${moved.items === 1 ? "" : "s"}, ${moved.fitChecks} fit check${moved.fitChecks === 1 ? "" : "s"}) is here now, and I'll message you on ${here} from now on. Same wardrobe link as before.`;
   }
