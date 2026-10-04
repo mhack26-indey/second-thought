@@ -1,6 +1,6 @@
 # Roadmap status
 
-Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 2026, after PR #20 (CO₂ estimates, letting items go, store listings, deleting fit checks).
+Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 2026, after PR #22 (monthly recap card).
 
 **Legend:** ✅ done · 🟡 partly done · ⬜ not started · ✂️ dropped by a plan change
 
@@ -10,7 +10,7 @@ Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 20
 |---|---|
 | P0: core (gate: hour 12) | ✅ 5 of 5 |
 | P1: differentiator | ✅ 3 of 3 |
-| P2: stretch | 🟡 1 of 4 |
+| P2: stretch | 🟡 2 of 4 |
 | Submission checklist | 🟡 README only; **the repo is still private** |
 
 **P0 is done, so the hour 12 gate is met** (built in code; still to be checked live end to end). P1 is done too, and misread fit checks can now be fixed on the wardrobe page or by text. Next: make the repo public, seed and rehearse the demo, then the rest of the submission checklist; P2 only if time is left.
@@ -40,7 +40,7 @@ Where Second Thought stands against the [build plan](PLAN.md). Updated Oct 3, 20
 | Season-aware closet ghosts + resale drafts | ⬜ | Needs weather: `outfits.temperature` isn't stored yet. Cities are already real places (Open-Meteo geocoding), so adding the forecast is a small step. The selling side exists: sales are recorded (with price and CO₂) from the page or by text (#18), and wear history is there for "unworn in 60 days". |
 | Nessie transaction detection | ⬜ | Decide at hour 12 per the plan; currently out of reach. |
 | Secondhand search links | ✅ | The shopping check's "no match" reply links a Depop search built from the extracted description. |
-| Monthly recap card | ⬜ | |
+| Monthly recap card | ✅ | A 1080×1350 image: estimated CO₂ saved, fit checks, pieces worn out of the closet, skips or money back, the most-worn piece **per category** with its photo, and pieces that didn't get worn. "my recap" texts it for the last 30 days; the wardrobe page links to `/w/<token>/recap`; the scheduler sends last month's on the 1st, once per user. Drawn server-side with Satori + resvg (#22). |
 
 ## Built beyond the plan
 
@@ -95,7 +95,7 @@ These weren't features in the plan, but the flows need them:
 | Shopping: photo of black pants → your near-identical pair, still returnable | ✅ Matches from an order with an open window say "still returnable until Oct 31" |
 | Returns: order screenshot → "you haven't worn this" → "return" | ✅ "check returns" nudges the seeded Zara jacket; a live screenshot is only picked up if its order date is at least a week old |
 | Worth buying | ✅ (needs the seeded fit checks to say something interesting) |
-| Close on the impact counter | ✅ Text "my impact", or open the wardrobe page; it now ends on an estimated CO₂ number with sources |
+| Close on the impact counter | ✅ Text "my impact", or open the wardrobe page; it now ends on an estimated CO₂ number with sources. "my recap" is a stronger closing visual: one shareable card |
 
 ## Submission checklist
 
@@ -126,9 +126,9 @@ These weren't features in the plan, but the flows need them:
 
 ## Suggested next steps, in order
 
-1. **Make the repo public** (after a quick check that nothing sensitive is committed). Still private.
+1. **Make the repo public when the Devpost is created** (the team's plan), after a quick check that nothing sensitive is committed.
 2. **Seed and rehearse.** Create the Neon branch, run `bun run seed:demo`, merge any duplicates with the fit check editor, and walk the demo script on a real phone: a fit check, a correction, a real order screenshot, a real store listing, "do I have this?" ending on the CO₂ line, and "my impact".
 3. **README pass:** add the fit check editor (merge, search, delete), text corrections, letting items go, CO₂ estimates with their sources, and listing reading; final read for the LLM judge.
 4. **Color names in bad light.** Try the extraction prompt fix and rerun `bun run eval:closet`.
 5. **A fallback provider for photo calls**, so one provider outage doesn't stop photo reading during the demo.
-6. Then the rest of the submission checklist (Devpost, backup video, Figma, screenshots, sponsor requirements, pitch run-throughs). If there's time for P2, "unworn in 60 days → want to sell it?" is the cheapest piece: wears and selling already exist.
+6. Then the rest of the submission checklist (Devpost, backup video, Figma, screenshots, sponsor requirements, pitch run-throughs). The recap card doubles as a Devpost gallery image. If there's time for more P2, "unworn in 60 days → want to sell it?" is the cheapest piece (wears and selling already exist); Nessie only if entering that track.
